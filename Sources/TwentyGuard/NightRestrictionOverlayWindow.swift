@@ -1,20 +1,58 @@
 import Cocoa
+import TwentyGuardCore
 
 protocol NightRestrictionOverlayDelegate: AnyObject {
-    func didRequestNightTestingExit()
+    func didRequestNightOverride()
+    func didCancelNightOverride(request: NightOverrideRequest)
+    func didGrantNightOverride(reason: NightOverrideReason, request: NightOverrideRequest)
+}
+
+struct NightOverrideOverlayText {
+    let requestTitle: String
+    let reasonTitle: String
+    let reasonTitles: [(reason: NightOverrideReason, title: String)]
+    let waitFormat: String
+    let waitExplanation: String
+    let confirmPrompt: String
+    let confirmationText: String
+    let inputPlaceholder: String
+    let cancelTitle: String
+    let unlockTitle: String
+    let mismatchText: String
 }
 
 final class NightRestrictionOverlayWindow: NSWindow {
     weak var nightDelegate: NightRestrictionOverlayDelegate?
 
+    private var lockedStack: NSStackView!
+    private var requestStack: NSStackView!
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
     private var countdownLabel: NSTextField!
     private var recoveryLabel: NSTextField!
     private var scheduleLabel: NSTextField!
-    private var testingExitButton: NSButton!
-    private var confirmationTimer: Timer?
-    private var isConfirmingTestingExit = false
+    private var overrideButton: NSButton!
+
+    private var requestTitleLabel: NSTextField!
+    private var reasonTitleLabel: NSTextField!
+    private var reasonStack: NSStackView!
+    private var waitLabel: NSTextField!
+    private var waitExplanationLabel: NSTextField!
+    private var confirmPromptLabel: NSTextField!
+    private var confirmationLabel: NSTextField!
+    private var confirmationField: NoPasteTextField!
+    private var mismatchLabel: NSTextField!
+    private var cancelButton: NSButton!
+    private var unlockButton: NSButton!
+
+    private var request: NightOverrideRequest?
+    private var selectedReason: NightOverrideReason?
+    private var expectedConfirmation = ""
+    private var waitRemaining = 0
+    private var waitFormat = ""
+    private var unlockTitle = ""
+    private var mismatchText = ""
+    private var requestTimer: Timer?
 
     override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -40,53 +78,94 @@ final class NightRestrictionOverlayWindow: NSWindow {
     private func setupUI() {
         guard let contentView else { return }
 
-        titleLabel = makeLabel("夜间禁用", size: 18, weight: .medium, color: .secondaryLabelColor)
-        subtitleLabel = makeLabel("屏幕已禁用", size: 44, weight: .semibold, color: .labelColor)
+        titleLabel = makeLabel("", size: 18, weight: .medium, color: .secondaryLabelColor)
+        subtitleLabel = makeLabel("", size: 44, weight: .semibold, color: .labelColor)
         countdownLabel = makeLabel("00:00:00", size: 86, weight: .bold, color: .labelColor, monospaced: true)
         recoveryLabel = makeLabel("", size: 22, weight: .semibold, color: .labelColor)
         scheduleLabel = makeLabel("", size: 15, weight: .regular, color: .secondaryLabelColor)
 
-        testingExitButton = NSButton(title: "测试出口", target: self, action: #selector(testingExitClicked))
-        testingExitButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        testingExitButton.bezelStyle = .inline
-        testingExitButton.translatesAutoresizingMaskIntoConstraints = false
-        testingExitButton.contentTintColor = .secondaryLabelColor
+        lockedStack = makeVerticalStack(spacing: 14)
+        lockedStack.alignment = .centerX
+        lockedStack.addArrangedSubview(titleLabel)
+        lockedStack.addArrangedSubview(subtitleLabel)
+        lockedStack.setCustomSpacing(34, after: subtitleLabel)
+        lockedStack.addArrangedSubview(countdownLabel)
+        lockedStack.setCustomSpacing(38, after: countdownLabel)
+        lockedStack.addArrangedSubview(recoveryLabel)
+        lockedStack.addArrangedSubview(scheduleLabel)
 
-        for view in [titleLabel!, subtitleLabel!, countdownLabel!, recoveryLabel!, scheduleLabel!] {
-            contentView.addSubview(view)
-        }
-        contentView.addSubview(testingExitButton)
+        requestTitleLabel = makeLabel("", size: 32, weight: .semibold, color: .labelColor)
+        reasonTitleLabel = makeLabel("", size: 14, weight: .medium, color: .secondaryLabelColor)
+        reasonStack = makeHorizontalStack(spacing: 10)
+        waitLabel = makeLabel("", size: 24, weight: .semibold, color: .labelColor)
+        waitExplanationLabel = makeLabel("", size: 13, weight: .regular, color: .secondaryLabelColor)
+        confirmPromptLabel = makeLabel("", size: 14, weight: .medium, color: .secondaryLabelColor)
+        confirmationLabel = makeLabel("", size: 16, weight: .semibold, color: .labelColor)
+        confirmationField = NoPasteTextField()
+        confirmationField.translatesAutoresizingMaskIntoConstraints = false
+        confirmationField.font = .systemFont(ofSize: 16, weight: .medium)
+        confirmationField.alignment = .center
+        confirmationField.delegate = self
+        confirmationField.menu = nil
+        mismatchLabel = makeLabel("", size: 12, weight: .medium, color: .systemRed)
+        mismatchLabel.isHidden = true
+
+        let actionRow = makeHorizontalStack(spacing: 12)
+        actionRow.alignment = .centerY
+        cancelButton = NSButton(title: "", target: self, action: #selector(cancelOverrideClicked))
+        cancelButton.bezelStyle = .rounded
+        unlockButton = NSButton(title: "", target: self, action: #selector(unlockOverrideClicked))
+        unlockButton.bezelStyle = .rounded
+        actionRow.addArrangedSubview(cancelButton)
+        actionRow.addArrangedSubview(unlockButton)
+
+        requestStack = makeVerticalStack(spacing: 14)
+        requestStack.alignment = .centerX
+        requestStack.addArrangedSubview(requestTitleLabel)
+        requestStack.setCustomSpacing(22, after: requestTitleLabel)
+        requestStack.addArrangedSubview(reasonTitleLabel)
+        requestStack.addArrangedSubview(reasonStack)
+        requestStack.setCustomSpacing(20, after: reasonStack)
+        requestStack.addArrangedSubview(waitLabel)
+        requestStack.addArrangedSubview(waitExplanationLabel)
+        requestStack.setCustomSpacing(20, after: waitExplanationLabel)
+        requestStack.addArrangedSubview(confirmPromptLabel)
+        requestStack.addArrangedSubview(confirmationLabel)
+        requestStack.addArrangedSubview(confirmationField)
+        requestStack.addArrangedSubview(mismatchLabel)
+        requestStack.setCustomSpacing(18, after: mismatchLabel)
+        requestStack.addArrangedSubview(actionRow)
+        requestStack.isHidden = true
+
+        overrideButton = NSButton(title: "", target: self, action: #selector(overrideClicked))
+        overrideButton.font = .systemFont(ofSize: 12, weight: .regular)
+        overrideButton.bezelStyle = .inline
+        overrideButton.translatesAutoresizingMaskIntoConstraints = false
+        overrideButton.contentTintColor = .secondaryLabelColor
+
+        contentView.addSubview(lockedStack)
+        contentView.addSubview(requestStack)
+        contentView.addSubview(overrideButton)
 
         NSLayoutConstraint.activate([
-            countdownLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            countdownLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: -10),
-            countdownLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
-            countdownLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
+            lockedStack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            lockedStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: -10),
+            lockedStack.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
+            lockedStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
 
-            subtitleLabel.bottomAnchor.constraint(equalTo: countdownLabel.topAnchor, constant: -34),
-            subtitleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
-            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
-            subtitleLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            requestStack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            requestStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            requestStack.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
+            requestStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
+            requestStack.widthAnchor.constraint(lessThanOrEqualToConstant: 680),
 
-            titleLabel.bottomAnchor.constraint(equalTo: subtitleLabel.topAnchor, constant: -12),
-            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
-            titleLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            confirmationField.widthAnchor.constraint(equalToConstant: 560),
+            confirmationField.heightAnchor.constraint(equalToConstant: 34),
 
-            recoveryLabel.topAnchor.constraint(equalTo: countdownLabel.bottomAnchor, constant: 38),
-            recoveryLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
-            recoveryLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
-            recoveryLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-
-            scheduleLabel.topAnchor.constraint(equalTo: recoveryLabel.bottomAnchor, constant: 18),
-            scheduleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 56),
-            scheduleLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -56),
-            scheduleLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-
-            testingExitButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -22),
-            testingExitButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18),
-            testingExitButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 68),
-            testingExitButton.heightAnchor.constraint(equalToConstant: 24)
+            overrideButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -22),
+            overrideButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18),
+            overrideButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 96),
+            overrideButton.heightAnchor.constraint(equalToConstant: 26)
         ])
     }
 
@@ -102,17 +181,81 @@ final class NightRestrictionOverlayWindow: NSWindow {
         return label
     }
 
-    func configure(unlockTime: Date, scheduleText: String, testingExitEnabled: Bool) {
-        scheduleLabel.stringValue = scheduleText
-        testingExitButton.isHidden = !testingExitEnabled
-        resetTestingExitConfirmation()
-        update(unlockTime: unlockTime, now: Date())
+    private func makeVerticalStack(spacing: CGFloat) -> NSStackView {
+        let stack = NSStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.spacing = spacing
+        return stack
     }
 
-    func update(unlockTime: Date, now: Date) {
+    private func makeHorizontalStack(spacing: CGFloat) -> NSStackView {
+        let stack = NSStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .horizontal
+        stack.spacing = spacing
+        return stack
+    }
+
+    func configureLocked(
+        title: String,
+        subtitle: String,
+        unlockTime: Date,
+        recoveryFormat: String,
+        scheduleText: String,
+        overrideButtonTitle: String
+    ) {
+        requestTimer?.invalidate()
+        requestTimer = nil
+        request = nil
+        selectedReason = nil
+
+        titleLabel.stringValue = title
+        subtitleLabel.stringValue = subtitle
+        scheduleLabel.stringValue = scheduleText
+        overrideButton.title = overrideButtonTitle
+        lockedStack.isHidden = false
+        requestStack.isHidden = true
+        overrideButton.isHidden = false
+        update(unlockTime: unlockTime, now: Date(), recoveryFormat: recoveryFormat)
+    }
+
+    func configureOverrideRequest(_ request: NightOverrideRequest, text: NightOverrideOverlayText) {
+        self.request = request
+        selectedReason = nil
+        expectedConfirmation = text.confirmationText
+        waitRemaining = request.waitSeconds
+        waitFormat = text.waitFormat
+        unlockTitle = text.unlockTitle
+        mismatchText = text.mismatchText
+
+        requestTitleLabel.stringValue = text.requestTitle
+        reasonTitleLabel.stringValue = text.reasonTitle
+        waitLabel.stringValue = String(format: text.waitFormat, waitRemaining)
+        waitExplanationLabel.stringValue = text.waitExplanation
+        confirmPromptLabel.stringValue = text.confirmPrompt
+        confirmationLabel.stringValue = text.confirmationText
+        confirmationField.placeholderString = text.inputPlaceholder
+        confirmationField.stringValue = ""
+        mismatchLabel.stringValue = text.mismatchText
+        mismatchLabel.isHidden = true
+        cancelButton.title = text.cancelTitle
+        unlockButton.title = String(format: text.waitFormat, waitRemaining)
+
+        rebuildReasonButtons(text.reasonTitles)
+        lockedStack.isHidden = true
+        requestStack.isHidden = false
+        overrideButton.isHidden = true
+        updateUnlockButton()
+        startRequestTimer()
+    }
+
+    func update(unlockTime: Date, now: Date, recoveryFormat: String? = nil) {
         let remaining = max(0, Int(unlockTime.timeIntervalSince(now)))
         countdownLabel.stringValue = formatRemaining(remaining)
-        recoveryLabel.stringValue = "\(formatClock(unlockTime)) 恢复使用"
+        if let recoveryFormat {
+            recoveryLabel.stringValue = String(format: recoveryFormat, formatClock(unlockTime))
+        }
     }
 
     func showOverlay() {
@@ -122,9 +265,51 @@ final class NightRestrictionOverlayWindow: NSWindow {
     }
 
     func hideOverlay() {
-        confirmationTimer?.invalidate()
-        confirmationTimer = nil
+        requestTimer?.invalidate()
+        requestTimer = nil
         orderOut(nil)
+    }
+
+    private func rebuildReasonButtons(_ reasons: [(reason: NightOverrideReason, title: String)]) {
+        for view in reasonStack.arrangedSubviews {
+            reasonStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for entry in reasons {
+            let button = NSButton(title: entry.title, target: self, action: #selector(reasonClicked(_:)))
+            button.bezelStyle = .rounded
+            button.setButtonType(.toggle)
+            button.tag = NightOverrideReason.allCases.firstIndex(of: entry.reason) ?? 0
+            reasonStack.addArrangedSubview(button)
+        }
+    }
+
+    private func startRequestTimer() {
+        requestTimer?.invalidate()
+        requestTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            guard let self else { return }
+            self.waitRemaining = max(0, self.waitRemaining - 1)
+            self.updateUnlockButton()
+            if self.waitRemaining == 0 {
+                timer.invalidate()
+                self.requestTimer = nil
+            }
+        }
+    }
+
+    private func updateUnlockButton() {
+        if waitRemaining > 0 {
+            waitLabel.stringValue = String(format: waitFormat, waitRemaining)
+            unlockButton.title = String(format: waitFormat, waitRemaining)
+            unlockButton.isEnabled = false
+        } else {
+            waitLabel.stringValue = unlockTitle
+            unlockButton.title = unlockTitle
+            unlockButton.isEnabled = selectedReason != nil && confirmationField.stringValue == expectedConfirmation
+        }
+
+        mismatchLabel.isHidden = confirmationField.stringValue.isEmpty || confirmationField.stringValue == expectedConfirmation
     }
 
     private func formatRemaining(_ seconds: Int) -> String {
@@ -140,28 +325,53 @@ final class NightRestrictionOverlayWindow: NSWindow {
         return formatter.string(from: date)
     }
 
-    @objc private func testingExitClicked() {
-        guard !isConfirmingTestingExit else {
-            nightDelegate?.didRequestNightTestingExit()
+    @objc private func overrideClicked() {
+        nightDelegate?.didRequestNightOverride()
+    }
+
+    @objc private func reasonClicked(_ sender: NSButton) {
+        guard NightOverrideReason.allCases.indices.contains(sender.tag) else { return }
+        selectedReason = NightOverrideReason.allCases[sender.tag]
+
+        for case let button as NSButton in reasonStack.arrangedSubviews {
+            button.state = button == sender ? .on : .off
+        }
+
+        updateUnlockButton()
+    }
+
+    @objc private func cancelOverrideClicked() {
+        guard let request else { return }
+        nightDelegate?.didCancelNightOverride(request: request)
+    }
+
+    @objc private func unlockOverrideClicked() {
+        guard let request, let selectedReason else { return }
+        guard waitRemaining == 0, confirmationField.stringValue == expectedConfirmation else {
+            updateUnlockButton()
             return
         }
 
-        isConfirmingTestingExit = true
-        testingExitButton.title = "再次点击确认"
-        confirmationTimer?.invalidate()
-        confirmationTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-            self?.resetTestingExitConfirmation()
-        }
-    }
-
-    private func resetTestingExitConfirmation() {
-        isConfirmingTestingExit = false
-        testingExitButton?.title = "测试出口"
-        confirmationTimer?.invalidate()
-        confirmationTimer = nil
+        nightDelegate?.didGrantNightOverride(reason: selectedReason, request: request)
     }
 
     override var canBecomeKey: Bool {
         true
+    }
+}
+
+extension NightRestrictionOverlayWindow: NSTextFieldDelegate {
+    func controlTextDidChange(_ notification: Notification) {
+        updateUnlockButton()
+    }
+}
+
+private final class NoPasteTextField: NSTextField {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let characters = event.charactersIgnoringModifiers?.lowercased()
+        if event.modifierFlags.contains(.command), characters == "v" {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }

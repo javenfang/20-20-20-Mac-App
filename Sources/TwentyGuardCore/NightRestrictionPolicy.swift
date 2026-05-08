@@ -35,20 +35,17 @@ public struct NightRestrictionSettings: Codable, Equatable, Sendable {
     public var windDownStart: ClockTime
     public var lockStart: ClockTime
     public var unlockTime: ClockTime
-    public var testingExitEnabled: Bool
 
     public init(
         isEnabled: Bool = false,
         windDownStart: ClockTime = ClockTime(hour: 20, minute: 0),
         lockStart: ClockTime = ClockTime(hour: 21, minute: 0),
-        unlockTime: ClockTime = ClockTime(hour: 7, minute: 0),
-        testingExitEnabled: Bool = true
+        unlockTime: ClockTime = ClockTime(hour: 7, minute: 0)
     ) {
         self.isEnabled = isEnabled
         self.windDownStart = windDownStart
         self.lockStart = lockStart
         self.unlockTime = unlockTime
-        self.testingExitEnabled = testingExitEnabled
     }
 }
 
@@ -123,11 +120,11 @@ public struct NightRestrictionPolicy: Sendable {
         now: Date,
         baseWorkDurationSeconds: Int,
         settings: NightRestrictionSettings,
-        disabledUntil: Date? = nil
+        overrideUntil: Date? = nil
     ) -> NightRestrictionStatus {
         let baseDuration = max(60, baseWorkDurationSeconds)
         let schedule = relevantSchedule(now: now, settings: settings)
-        let isOverrideActive = disabledUntil.map { now < $0 } ?? false
+        let isOverrideActive = overrideUntil.map { now < $0 } ?? false
 
         guard settings.isEnabled, !isOverrideActive else {
             return NightRestrictionStatus(

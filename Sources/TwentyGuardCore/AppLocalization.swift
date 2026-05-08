@@ -151,13 +151,25 @@ public enum AppLocalization {
             return []
         }
 
-        return enumerator.compactMap { item -> URL? in
+        let matches = enumerator.compactMap { item -> URL? in
             guard let url = item as? URL, url.lastPathComponent == coreResourceBundleName else {
                 return nil
             }
 
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
             return values?.isDirectory == true ? url : nil
+        }
+
+        return matches.sorted { lhs, rhs in
+            let lhsIsDebug = lhs.path.contains("/debug/")
+            let rhsIsDebug = rhs.path.contains("/debug/")
+            if lhsIsDebug != rhsIsDebug {
+                return lhsIsDebug
+            }
+
+            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhsDate > rhsDate
         }
     }
 }

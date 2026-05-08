@@ -1,7 +1,7 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.5.3
-> **最后更新**: 2026-05-07
+> **文档版本**: v1.5.4
+> **最后更新**: 2026-05-08
 > **维护者**: Javen Fang (@javenfang)
 
 ---
@@ -54,7 +54,8 @@
 graph TB
     subgraph "应用层"
         A[AppDelegate<br/>核心控制器] --> B[BreakOverlayWindow<br/>休息提醒窗口]
-        A --> C[SimpleStatsWindow<br/>统计窗口]
+        A --> C[StatsDashboardWindow<br/>统计窗口]
+        A --> N[NightRestrictionOverlayWindow<br/>夜间锁定遮罩]
     end
 
     subgraph "数据层"
@@ -117,12 +118,14 @@ Sources/TwentyGuard/
 - 菜单栏UI管理
 - 系统事件响应
 - 会话状态管理
+- 夜间禁用和正式破例状态管理
 
 **关键设计**:
 - 使用三种 Timer：工作/休息/状态快照
 - 使用绝对时间 `Date` 记录会话开始时间
 - 通过计算属性实时计算剩余时间（避免累积误差）
 - ⭐ v1.2.0 更新：默认模式推迟总计最多 5 分钟，自定义模式可选 5/10 分钟
+- ⭐ v1.5.4 更新：夜间禁用移除测试出口，改为带等待、原因和确认句的正式破例流程
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -147,7 +150,27 @@ Sources/TwentyGuard/
 - 全局键盘事件监听，无需窗口焦点 ([`BreakOverlayWindow.swift:310-332`](../Sources/TwentyGuard/BreakOverlayWindow.swift#L310-L332))
 - 通过委托模式通知 AppDelegate 处理推迟请求
 
-### 2.3 EventRecorder - 事件记录器
+### 2.3 NightRestrictionPolicy / NightOverridePolicy - 夜间边界
+
+**文件**:
+- [`NightRestrictionPolicy.swift`](../Sources/TwentyGuardCore/NightRestrictionPolicy.swift)
+- [`NightOverridePolicy.swift`](../Sources/TwentyGuardCore/NightOverridePolicy.swift)
+- [`NightRestrictionOverlayWindow.swift`](../Sources/TwentyGuard/NightRestrictionOverlayWindow.swift)
+
+**职责**:
+- 计算夜间收紧、完全禁用和恢复可用的时间段
+- 根据当前夜间阶段调整工作周期上限
+- 在完全禁用阶段显示多屏全屏遮罩
+- 管理正式破例：等待成本、原因、确认句、30 分钟解锁窗口
+
+**正式破例规则**:
+- 第 1 次破例等待 60 秒，第 2 次等待 90 秒，第 3 次及以后等待 120 秒
+- 每次破例只解锁 30 分钟
+- 破例必须选择原因，并逐字输入本地化确认句；确认输入禁止粘贴
+- 活跃破例保存到 UserDefaults，重启后仍按剩余时间生效
+- 破例请求、授权、取消、到期写入 JSONL 日志
+
+### 2.4 EventRecorder - 事件记录器
 
 **文件**: [`EventRecorder.swift`](../Sources/TwentyGuard/EventRecorder.swift)
 
@@ -175,9 +198,10 @@ graph LR
 - `startWorkSession(duration:)` - 开始工作会话
 - `startBreakSession(duration:)` - 开始休息会话
 - `recordPostpone(minutes:)` - 记录推迟事件
+- `recordNightOverrideRequested(...)` / `recordNightOverrideGranted(...)` - 记录夜间破例事件
 - `getTodayStats()` - 获取今日统计
 
-### 2.4 StatsDatabase - SQLite存储
+### 2.5 StatsDatabase - SQLite存储
 
 **文件**: [`StatsDatabase.swift`](../Sources/TwentyGuard/StatsDatabase.swift)
 
@@ -226,7 +250,7 @@ CREATE TABLE daily_stats (
 ~/Library/Application Support/com.javengroup.twentyguard/twentyguard_stats.db
 ```
 
-### 2.5 LogManager - JSON日志
+### 2.6 LogManager - JSON日志
 
 **文件**: [`LogManager.swift`](../Sources/TwentyGuard/LogManager.swift)
 
@@ -247,6 +271,7 @@ CREATE TABLE daily_stats (
 - 工作/休息周期: `work_started`, `work_completed`, `break_started`, etc.
 - 系统事件: `system_sleep`, `screensaver_start`, etc.
 - 应用事件: `app_launched`, `settings_changed`, etc.
+- 夜间破例: `night_override_requested`, `night_override_granted`, `night_override_cancelled`, `night_override_expired`
 
 ---
 
@@ -431,8 +456,14 @@ graph TB
 - `customWorkDuration` / `customBreakDuration`: 自定义时长
 - `currentLanguage`: 当前语言
 - `loginItemEnabled`: 是否开机启动
+- `nightRestrictionEnabled` / `nightWindDownStartMinutes` / `nightLockStartMinutes` / `nightUnlockMinutes`: 夜间禁用配置
+- `nightOverrideGrantedAt` / `nightOverrideUntil` / `nightOverrideReason` / `nightOverrideNightKey` / `nightOverrideNumberForNight`: 活跃夜间破例状态
+- `nightOverrideCountNightKey` / `nightOverrideCountForNight`: 当前夜晚破例次数，用于递增等待成本
 
 **时机**: 应用启动时读取 (`loadSettings`)，设置变更时立即保存 (`saveSettings`)
+
+旧版 `nightTestingExitEnabled` 和 `nightLockOverrideUntil` 会在启动时清理，不再参与
+夜间禁用逻辑。
 
 ### 6.3 SessionState - 会话状态
 
@@ -558,7 +589,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.5.3</string>
+<string>1.5.4</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -588,6 +619,9 @@ make release \
 - Gatekeeper: `accepted`, source `Notarized Developer ID`
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
+
+v1.5.4 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.5.4.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -813,6 +847,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.5.1 | 2026-05-07 | 更新 app 图标与状态栏图标资源；补充营销发布资料、渠道草稿和素材清单 |
 | v1.5.2 | 2026-05-07 | 多语言系统迁移到 SwiftPM `.lproj/Localizable.strings` 标准资源；补齐夜间禁用和统计面板翻译；新增多语言完整性测试；发布 Developer ID 签名并公证的 DMG |
 | v1.5.3 | 2026-05-07 | 修复分发版启动时 SwiftPM resource bundle 查找路径导致的崩溃；补齐标准 app bundle 元数据；新增 app/DMG 打包结构校验和资源查找回归测试；发布签名公证 DMG |
+| v1.5.4 | 2026-05-08 | 夜间禁用移除测试出口，新增正式破例状态机、递增等待成本、确认句、事件日志、统计汇总和本地化回归测试 |
 
 ### B. 相关文档
 
@@ -828,5 +863,5 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 
 ---
 
-**最后更新**: 2026-05-07
-**文档版本**: v1.5.3
+**最后更新**: 2026-05-08
+**文档版本**: v1.5.4

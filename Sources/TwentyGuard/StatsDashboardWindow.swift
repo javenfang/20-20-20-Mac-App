@@ -3,6 +3,7 @@ import TwentyGuardCore
 
 final class StatsDashboardWindow: NSWindow {
     private let statsDB = StatsDatabase.shared
+    private let logManager = LogManager.shared
     private let verdictEvaluator = StatsHealthVerdictEvaluator()
     private var localizer: ((String) -> String)?
     private let contentStack = NSStackView()
@@ -258,11 +259,12 @@ final class StatsDashboardWindow: NSWindow {
             detail: localizedFormat("statsPostponedSessionsFormat", today.postponedSessions),
             accent: today.postponeSessionRate > 0.3 ? .systemOrange : .systemGreen
         ))
+        let isNightRestrictionEnabled = nightRestrictionEnabled()
         row.addArrangedSubview(makeMetricCard(
             title: localized("statsNightMetric"),
-            value: nightRestrictionEnabled() ? localized("statsEnabled") : localized("statsDisabled"),
-            detail: localized("statsNightDetail"),
-            accent: nightRestrictionEnabled() ? .systemGreen : .secondaryLabelColor,
+            value: isNightRestrictionEnabled ? localized("statsEnabled") : localized("statsDisabled"),
+            detail: nightOverrideDetail(isEnabled: isNightRestrictionEnabled),
+            accent: isNightRestrictionEnabled ? .systemGreen : .secondaryLabelColor,
             monospacedValue: false
         ))
 
@@ -551,6 +553,73 @@ final class StatsDashboardWindow: NSWindow {
 
     private func nightRestrictionEnabled() -> Bool {
         UserDefaults.standard.bool(forKey: "nightRestrictionEnabled")
+    }
+
+    private func nightOverrideDetail(isEnabled: Bool) -> String {
+        guard isEnabled else { return localized("statsNightDetail") }
+
+        let summary = logManager.nightOverrideSummary(nightKey: currentStatsNightKey())
+        if summary.count == 0 {
+            return localized("statsNightNoOverride")
+        }
+        return localizedFormat("statsNightOverrideFormat", summary.count, summary.totalMinutes)
+    }
+
+    private func currentStatsNightKey(now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        let settings = NightRestrictionSettings(
+            isEnabled: true,
+            windDownStart: loadClockTime(forKey: "nightWindDownStartMinutes", defaultValue: ClockTime(hour: 20, minute: 0)),
+            lockStart: loadClockTime(forKey: "nightLockStartMinutes", defaultValue: ClockTime(hour: 21, minute: 0)),
+            unlockTime: loadClockTime(forKey: "nightUnlockMinutes", defaultValue: ClockTime(hour: 7, minute: 0))
+        )
+        let today = calendar.startOfDay(for: now)
+        let windDownToday = date(on: today, at: settings.windDownStart, calendar: calendar)
+        let anchorDay: Date
+        if now >= windDownToday {
+            anchorDay = today
+        } else {
+            anchorDay = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        }
+
+        let schedule = nightSchedule(anchorDay: anchorDay, settings: settings, calendar: calendar)
+        return NightOverridePolicy(calendar: calendar).nightKey(for: schedule)
+    }
+
+    private func loadClockTime(forKey key: String, defaultValue: ClockTime) -> ClockTime {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return defaultValue }
+        let minutes = min(23 * 60 + 59, max(0, UserDefaults.standard.integer(forKey: key)))
+        return ClockTime(minutesAfterMidnight: minutes)
+    }
+
+    private func nightSchedule(anchorDay: Date, settings: NightRestrictionSettings, calendar: Calendar) -> NightRestrictionSchedule {
+        let windDownStart = date(on: anchorDay, at: settings.windDownStart, calendar: calendar)
+        var lockStart = date(on: anchorDay, at: settings.lockStart, calendar: calendar)
+        var unlockTime = date(on: anchorDay, at: settings.unlockTime, calendar: calendar)
+
+        while lockStart <= windDownStart {
+            lockStart = calendar.date(byAdding: .day, value: 1, to: lockStart) ?? lockStart.addingTimeInterval(24 * 60 * 60)
+        }
+        while unlockTime <= lockStart {
+            unlockTime = calendar.date(byAdding: .day, value: 1, to: unlockTime) ?? unlockTime.addingTimeInterval(24 * 60 * 60)
+        }
+
+        return NightRestrictionSchedule(
+            windDownStart: windDownStart,
+            lockStart: lockStart,
+            unlockTime: unlockTime,
+            windDownStartTime: settings.windDownStart,
+            lockStartTime: settings.lockStart,
+            unlockClockTime: settings.unlockTime
+        )
+    }
+
+    private func date(on day: Date, at time: ClockTime, calendar: Calendar) -> Date {
+        var components = calendar.dateComponents([.year, .month, .day], from: day)
+        components.hour = time.hour
+        components.minute = time.minute
+        components.second = 0
+        return calendar.date(from: components) ?? day
     }
 
     private func completionColor(_ rate: Double) -> NSColor {

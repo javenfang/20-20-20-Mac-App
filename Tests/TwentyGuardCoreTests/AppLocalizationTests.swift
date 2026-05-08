@@ -43,6 +43,43 @@ final class AppLocalizationTests: XCTestCase {
         XCTAssertEqual(AppLocalization.localized("nightRestriction", language: "ko"), "야간 화면 잠금")
     }
 
+    func testNightOverrideLocalizationsReplaceTestingEscape() {
+        let requiredKeys: Set<String> = [
+            "nightOverride",
+            "nightOverrideRequestTitle",
+            "nightOverrideReasonTitle",
+            "nightOverrideReasonUrgentWork",
+            "nightOverrideReasonLifeTask",
+            "nightOverrideReasonFamily",
+            "nightOverrideReasonOther",
+            "nightOverrideWaiting",
+            "nightOverrideWaitExplanation",
+            "nightOverrideConfirmPrompt",
+            "nightOverrideInputPlaceholder",
+            "nightOverrideUnlock",
+            "nightOverrideCancel",
+            "nightOverrideMismatch",
+            "nightOverrideActiveStatus",
+            "nightOverrideRecoveryFormat",
+            "nightOverrideConfirmationFirst",
+            "nightOverrideConfirmationSecond",
+            "nightOverrideConfirmationRepeated",
+            "statsNightNoOverride",
+            "statsNightOverrideFormat"
+        ]
+        let legacyKeys: Set<String> = [
+            "nightTestingExit",
+            "nightTestingExitShown",
+            "nightTestingExitHidden"
+        ]
+
+        for language in AppLocalization.supportedLanguageCodes {
+            let keys = AppLocalization.localizationKeys(language: language)
+            XCTAssertTrue(requiredKeys.isSubset(of: keys), "\(language) must include all night override keys")
+            XCTAssertTrue(keys.isDisjoint(with: legacyKeys), "\(language) must not expose testing escape keys")
+        }
+    }
+
     func testFindsCoreResourceBundleInStandardAppResourcesDirectory() throws {
         let appURL = temporaryDirectory()
             .appendingPathComponent("TwentyGuard.app", isDirectory: true)

@@ -1,4 +1,5 @@
 import Foundation
+import TwentyGuardCore
 
 // MARK: - EventRecorder
 
@@ -164,6 +165,64 @@ class EventRecorder {
         logManager.logSettingsChanged(changes: changes)
 
         print("📊 EventRecorder: Settings changed")
+    }
+
+    // MARK: - Night Override
+
+    func recordNightOverrideRequested(nightKey: String, request: NightOverrideRequest) {
+        logManager.logEvent(.nightOverrideRequested, context: nightOverrideContext(
+            nightKey: nightKey,
+            request: request
+        ))
+    }
+
+    func recordNightOverrideGranted(state: NightOverrideState, request: NightOverrideRequest) {
+        var context = nightOverrideContext(nightKey: state.nightKey, request: request)
+        context["reason"] = state.reason.rawValue
+        context["granted_at"] = formattedLogDate(state.grantedAt)
+        context["override_until"] = formattedLogDate(state.until)
+        logManager.logEvent(
+            .nightOverrideGranted,
+            duration: TimeInterval(request.unlockSeconds),
+            context: context
+        )
+    }
+
+    func recordNightOverrideCancelled(nightKey: String, request: NightOverrideRequest) {
+        logManager.logEvent(.nightOverrideCancelled, context: nightOverrideContext(
+            nightKey: nightKey,
+            request: request
+        ))
+    }
+
+    func recordNightOverrideExpired(state: NightOverrideState) {
+        let request = NightOverrideRequest(
+            overrideNumberForNight: state.overrideNumberForNight,
+            waitSeconds: 0,
+            unlockSeconds: NightOverridePolicy.unlockSeconds,
+            confirmationLocalizationKey: ""
+        )
+        var context = nightOverrideContext(nightKey: state.nightKey, request: request)
+        context["reason"] = state.reason.rawValue
+        context["granted_at"] = formattedLogDate(state.grantedAt)
+        context["override_until"] = formattedLogDate(state.until)
+        logManager.logEvent(.nightOverrideExpired, context: context)
+    }
+
+    private func nightOverrideContext(nightKey: String, request: NightOverrideRequest) -> [String: String] {
+        [
+            "night_key": nightKey,
+            "override_number": "\(request.overrideNumberForNight)",
+            "wait_seconds": "\(request.waitSeconds)",
+            "unlock_minutes": "\(request.unlockSeconds / 60)"
+        ]
+    }
+
+    private func formattedLogDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
     }
 
     // MARK: - Timer Reset

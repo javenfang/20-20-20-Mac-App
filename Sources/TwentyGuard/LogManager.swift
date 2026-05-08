@@ -36,7 +36,16 @@ struct LogEvent: Codable {
         case modeChanged = "mode_changed"
         case timerReset = "timer_reset"
         case stateSnapshot = "state_snapshot"
+        case nightOverrideRequested = "night_override_requested"
+        case nightOverrideGranted = "night_override_granted"
+        case nightOverrideCancelled = "night_override_cancelled"
+        case nightOverrideExpired = "night_override_expired"
     }
+}
+
+struct NightOverrideSummary: Equatable {
+    let count: Int
+    let totalMinutes: Int
 }
 
 struct SessionState: Codable {
@@ -141,10 +150,7 @@ class LogManager {
         
         let decoder = JSONDecoder()
         // Use same formatter as encoding to maintain consistency
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-        formatter.timeZone = TimeZone.current
-        decoder.dateDecodingStrategy = .formatted(formatter)
+        decoder.dateDecodingStrategy = .formatted(makeLogDateFormatter())
         
         do {
             let state = try decoder.decode(SessionState.self, from: data)
@@ -208,6 +214,23 @@ class LogManager {
         
         return logs
     }
+
+    func nightOverrideSummary(nightKey: String, days: Int = 7) -> NightOverrideSummary {
+        var count = 0
+        var totalMinutes = 0
+
+        for event in loadRecentEvents(days: days) where event.eventType == .nightOverrideGranted {
+            guard event.context?["night_key"] == nightKey else { continue }
+            count += 1
+            if let unlockMinutes = event.context?["unlock_minutes"].flatMap(Int.init) {
+                totalMinutes += unlockMinutes
+            } else if let duration = event.duration {
+                totalMinutes += max(1, Int(duration / 60))
+            }
+        }
+
+        return NightOverrideSummary(count: count, totalMinutes: totalMinutes)
+    }
     
     // MARK: - Private Methods
     
@@ -224,9 +247,7 @@ class LogManager {
         do {
             let encoder = JSONEncoder()
             // Use local timezone instead of UTC
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-            formatter.timeZone = TimeZone.current
+            let formatter = makeLogDateFormatter()
             encoder.dateEncodingStrategy = .formatted(formatter)
             let data = try encoder.encode(event)
             
@@ -254,9 +275,7 @@ class LogManager {
         do {
             let encoder = JSONEncoder()
             // Use local timezone instead of UTC
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-            formatter.timeZone = TimeZone.current
+            let formatter = makeLogDateFormatter()
             encoder.dateEncodingStrategy = .formatted(formatter)
             let data = try encoder.encode(state)
             try data.write(to: sessionStateURL)
@@ -271,6 +290,36 @@ class LogManager {
         formatter.timeZone = TimeZone.current
         let dateString = formatter.string(from: date)
         return logsDirectoryURL.appendingPathComponent("\(dateString).jsonl")
+    }
+
+    private func loadRecentEvents(days: Int) -> [LogEvent] {
+        var events: [LogEvent] = []
+        let calendar = Calendar.current
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .formatted(makeLogDateFormatter())
+
+        for offset in 0..<max(1, days) {
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: Date()) else { continue }
+            let fileURL = getLogFileURL(for: date)
+            guard let content = try? String(contentsOf: fileURL) else { continue }
+
+            for line in content.split(separator: "\n") {
+                guard let data = line.data(using: .utf8),
+                      let event = try? decoder.decode(LogEvent.self, from: data) else {
+                    continue
+                }
+                events.append(event)
+            }
+        }
+
+        return events
+    }
+
+    private func makeLogDateFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        formatter.timeZone = TimeZone.current
+        return formatter
     }
     
     private func performLogCleanup(keepDays: Int) {

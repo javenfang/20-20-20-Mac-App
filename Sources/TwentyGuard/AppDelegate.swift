@@ -8,6 +8,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         static let bundleIdentifier = "com.javengroup.twentyguard"
     }
 
+    private enum NightOverrideDefaults {
+        static let grantedAt = "nightOverrideGrantedAt"
+        static let until = "nightOverrideUntil"
+        static let reason = "nightOverrideReason"
+        static let nightKey = "nightOverrideNightKey"
+        static let numberForNight = "nightOverrideNumberForNight"
+        static let countNightKey = "nightOverrideCountNightKey"
+        static let countForNight = "nightOverrideCountForNight"
+        static let legacyOverrideUntil = "nightLockOverrideUntil"
+        static let legacyTestingExit = "nightTestingExitEnabled"
+    }
+
     private var statusBarItem: NSStatusItem!
     private var menu: NSMenu!
     private var workTimer: Timer?
@@ -54,8 +66,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Night restriction settings
     private let nightPolicy = NightRestrictionPolicy()
+    private let nightOverridePolicy = NightOverridePolicy()
     private var nightRestrictionSettings = NightRestrictionSettings()
-    private var nightLockOverrideUntil: Date?
+    private var nightOverrideState: NightOverrideState?
     
     // Language settings
     private var currentLanguage: String = ""
@@ -303,11 +316,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isEnabled: UserDefaults.standard.bool(forKey: "nightRestrictionEnabled"),
             windDownStart: loadClockTime(forKey: "nightWindDownStartMinutes", defaultValue: ClockTime(hour: 20, minute: 0)),
             lockStart: loadClockTime(forKey: "nightLockStartMinutes", defaultValue: ClockTime(hour: 21, minute: 0)),
-            unlockTime: loadClockTime(forKey: "nightUnlockMinutes", defaultValue: ClockTime(hour: 7, minute: 0)),
-            testingExitEnabled: UserDefaults.standard.object(forKey: "nightTestingExitEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "nightTestingExitEnabled")
+            unlockTime: loadClockTime(forKey: "nightUnlockMinutes", defaultValue: ClockTime(hour: 7, minute: 0))
         )
-        nightLockOverrideUntil = UserDefaults.standard.object(forKey: "nightLockOverrideUntil") as? Date
-        clearExpiredNightLockOverride()
+        cleanupLegacyNightOverrideDefaults()
+        nightOverrideState = loadNightOverrideState()
+        clearExpiredNightOverride()
 
         // Apply the loaded settings
         if isCustomMode {
@@ -332,12 +345,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(nightRestrictionSettings.windDownStart.minutesAfterMidnight, forKey: "nightWindDownStartMinutes")
         UserDefaults.standard.set(nightRestrictionSettings.lockStart.minutesAfterMidnight, forKey: "nightLockStartMinutes")
         UserDefaults.standard.set(nightRestrictionSettings.unlockTime.minutesAfterMidnight, forKey: "nightUnlockMinutes")
-        UserDefaults.standard.set(nightRestrictionSettings.testingExitEnabled, forKey: "nightTestingExitEnabled")
-        if let nightLockOverrideUntil {
-            UserDefaults.standard.set(nightLockOverrideUntil, forKey: "nightLockOverrideUntil")
-        } else {
-            UserDefaults.standard.removeObject(forKey: "nightLockOverrideUntil")
-        }
 
         // 记录设置变更
         let changes: [String: String] = [
@@ -351,8 +358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "night_restriction_enabled": "\(nightRestrictionSettings.isEnabled)",
             "night_wind_down_start": nightRestrictionSettings.windDownStart.displayString,
             "night_lock_start": nightRestrictionSettings.lockStart.displayString,
-            "night_unlock_time": nightRestrictionSettings.unlockTime.displayString,
-            "night_testing_exit_enabled": "\(nightRestrictionSettings.testingExitEnabled)"
+            "night_unlock_time": nightRestrictionSettings.unlockTime.displayString
         ]
         eventRecorder.recordSettingsChange(changes: changes)
     }
@@ -632,6 +638,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return ClockTime(minutesAfterMidnight: minutes)
     }
 
+    private func cleanupLegacyNightOverrideDefaults() {
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.legacyOverrideUntil)
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.legacyTestingExit)
+    }
+
+    private func loadNightOverrideState() -> NightOverrideState? {
+        guard let grantedAt = UserDefaults.standard.object(forKey: NightOverrideDefaults.grantedAt) as? Date,
+              let until = UserDefaults.standard.object(forKey: NightOverrideDefaults.until) as? Date,
+              let reasonRawValue = UserDefaults.standard.string(forKey: NightOverrideDefaults.reason),
+              let reason = NightOverrideReason(rawValue: reasonRawValue),
+              let nightKey = UserDefaults.standard.string(forKey: NightOverrideDefaults.nightKey) else {
+            clearNightOverrideState()
+            return nil
+        }
+
+        return NightOverrideState(
+            grantedAt: grantedAt,
+            until: until,
+            reason: reason,
+            nightKey: nightKey,
+            overrideNumberForNight: max(1, UserDefaults.standard.integer(forKey: NightOverrideDefaults.numberForNight))
+        )
+    }
+
+    private func saveNightOverrideState() {
+        guard let state = nightOverrideState else {
+            clearNightOverrideState()
+            return
+        }
+
+        UserDefaults.standard.set(state.grantedAt, forKey: NightOverrideDefaults.grantedAt)
+        UserDefaults.standard.set(state.until, forKey: NightOverrideDefaults.until)
+        UserDefaults.standard.set(state.reason.rawValue, forKey: NightOverrideDefaults.reason)
+        UserDefaults.standard.set(state.nightKey, forKey: NightOverrideDefaults.nightKey)
+        UserDefaults.standard.set(state.overrideNumberForNight, forKey: NightOverrideDefaults.numberForNight)
+    }
+
+    private func clearNightOverrideState() {
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.grantedAt)
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.until)
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.reason)
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.nightKey)
+        UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.numberForNight)
+    }
+
+    private func nightOverrideCount(for nightKey: String) -> Int {
+        guard UserDefaults.standard.string(forKey: NightOverrideDefaults.countNightKey) == nightKey else {
+            return 0
+        }
+        return max(0, UserDefaults.standard.integer(forKey: NightOverrideDefaults.countForNight))
+    }
+
+    private func saveNightOverrideCount(_ count: Int, nightKey: String) {
+        UserDefaults.standard.set(nightKey, forKey: NightOverrideDefaults.countNightKey)
+        UserDefaults.standard.set(max(0, count), forKey: NightOverrideDefaults.countForNight)
+    }
+
     private func setupNightRestrictionMenu() {
         nightRestrictionMenuItem = NSMenuItem(title: localized("nightRestriction"), action: nil, keyEquivalent: "")
         nightRestrictionMenuItem.submenu = buildNightRestrictionSubmenu()
@@ -704,27 +767,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let rhythmItem = NSMenuItem(title: nightRhythmSummaryTitle(), action: nil, keyEquivalent: "")
         rhythmItem.submenu = buildNightRhythmSubmenu()
         submenu.addItem(rhythmItem)
-
-        let testingExitStatus = nightRestrictionSettings.testingExitEnabled
-            ? localized("nightTestingExitShown")
-            : localized("nightTestingExitHidden")
-        let testingExitItem = NSMenuItem(title: "\(localized("nightTestingExit")): \(testingExitStatus)", action: nil, keyEquivalent: "")
-        let testingExitSubmenu = NSMenu()
-
-        let showTestingExitItem = NSMenuItem(title: localized("nightTestingExitShown"), action: #selector(selectNightTestingExitVisibility(_:)), keyEquivalent: "")
-        showTestingExitItem.target = self
-        showTestingExitItem.tag = 1
-        showTestingExitItem.state = nightRestrictionSettings.testingExitEnabled ? .on : .off
-        testingExitSubmenu.addItem(showTestingExitItem)
-
-        let hideTestingExitItem = NSMenuItem(title: localized("nightTestingExitHidden"), action: #selector(selectNightTestingExitVisibility(_:)), keyEquivalent: "")
-        hideTestingExitItem.target = self
-        hideTestingExitItem.tag = 0
-        hideTestingExitItem.state = nightRestrictionSettings.testingExitEnabled ? .off : .on
-        testingExitSubmenu.addItem(hideTestingExitItem)
-
-        testingExitItem.submenu = testingExitSubmenu
-        submenu.addItem(testingExitItem)
 
         return submenu
     }
@@ -828,13 +870,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusBarTitle()
     }
 
-    @objc private func selectNightTestingExitVisibility(_ sender: NSMenuItem) {
-        nightRestrictionSettings.testingExitEnabled = sender.tag == 1
-        saveSettings()
-        rebuildNightRestrictionMenu()
-        refreshNightLockOverlays()
-    }
-    
     @objc private func statusBarButtonClicked() {
         statusBarItem.menu = menu
         statusBarItem.button?.performClick(nil)
@@ -1339,7 +1374,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             let nightStatus = currentNightStatus()
 
-            if nightStatus.isLocked {
+            if nightStatus.isOverrideActive, let state = nightOverrideState {
+                button.title = " " + localized("nightOverrideActiveStatus") + " " + formatStatusBarTime(Int(max(0, state.until.timeIntervalSince(Date()))))
+            } else if nightStatus.isLocked {
                 button.title = " " + localized("nightLockedStatus")
             } else if showCountdownInStatusBar {
                 // 如果处于推迟状态，显示推迟倒计时
@@ -1419,19 +1456,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentNightStatus(now: Date = Date()) -> NightRestrictionStatus {
-        clearExpiredNightLockOverride(now: now)
+        clearExpiredNightOverride(now: now)
         return nightPolicy.status(
             now: now,
             baseWorkDurationSeconds: currentWorkDuration,
             settings: nightRestrictionSettings,
-            disabledUntil: nightLockOverrideUntil
+            overrideUntil: nightOverrideState?.until
         )
     }
 
-    private func clearExpiredNightLockOverride(now: Date = Date()) {
-        guard let overrideUntil = nightLockOverrideUntil, now >= overrideUntil else { return }
-        nightLockOverrideUntil = nil
-        UserDefaults.standard.removeObject(forKey: "nightLockOverrideUntil")
+    private func clearExpiredNightOverride(now: Date = Date()) {
+        guard let state = nightOverrideState, !nightOverridePolicy.isActive(state, now: now) else { return }
+        eventRecorder.recordNightOverrideExpired(state: state)
+        nightOverrideState = nil
+        saveNightOverrideState()
     }
 
     @discardableResult
@@ -1511,10 +1549,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for screen in NSScreen.screens {
             let overlay = NightRestrictionOverlayWindow(screen: screen)
             overlay.nightDelegate = self
-            overlay.configure(
+            overlay.configureLocked(
+                title: AppIdentity.displayName,
+                subtitle: localized("nightLockedStatus"),
                 unlockTime: unlockTime,
+                recoveryFormat: localized("nightOverrideRecoveryFormat"),
                 scheduleText: nightScheduleText(schedule),
-                testingExitEnabled: nightRestrictionSettings.testingExitEnabled
+                overrideButtonTitle: localized("nightOverride")
             )
             overlay.showOverlay()
             nightLockOverlays.append(overlay)
@@ -1537,7 +1578,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if case .locked(let unlockTime) = status.phase {
             for overlay in nightLockOverlays {
-                overlay.update(unlockTime: unlockTime, now: Date())
+                overlay.update(unlockTime: unlockTime, now: Date(), recoveryFormat: localized("nightOverrideRecoveryFormat"))
             }
         } else {
             leaveNightLock(startFreshWorkSession: true)
@@ -1567,10 +1608,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let scheduleText = nightScheduleText(status.schedule)
         for overlay in nightLockOverlays {
-            overlay.configure(
+            overlay.configureLocked(
+                title: AppIdentity.displayName,
+                subtitle: localized("nightLockedStatus"),
                 unlockTime: unlockTime,
+                recoveryFormat: localized("nightOverrideRecoveryFormat"),
                 scheduleText: scheduleText,
-                testingExitEnabled: nightRestrictionSettings.testingExitEnabled
+                overrideButtonTitle: localized("nightOverride")
             )
         }
     }
@@ -1586,13 +1630,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let limitText = formatDurationForMenu(limitSeconds)
         return String(format: localized("nightWindDownBreakHint"), limitText, formatter.string(from: lockStart))
     }
+
+    private func nightOverrideOverlayText(for request: NightOverrideRequest) -> NightOverrideOverlayText {
+        NightOverrideOverlayText(
+            requestTitle: localized("nightOverrideRequestTitle"),
+            reasonTitle: localized("nightOverrideReasonTitle"),
+            reasonTitles: [
+                (.urgentWork, localized("nightOverrideReasonUrgentWork")),
+                (.lifeTask, localized("nightOverrideReasonLifeTask")),
+                (.family, localized("nightOverrideReasonFamily")),
+                (.other, localized("nightOverrideReasonOther"))
+            ],
+            waitFormat: localized("nightOverrideWaiting"),
+            waitExplanation: localized("nightOverrideWaitExplanation"),
+            confirmPrompt: localized("nightOverrideConfirmPrompt"),
+            confirmationText: localized(request.confirmationLocalizationKey),
+            inputPlaceholder: localized("nightOverrideInputPlaceholder"),
+            cancelTitle: localized("nightOverrideCancel"),
+            unlockTitle: localized("nightOverrideUnlock"),
+            mismatchText: localized("nightOverrideMismatch")
+        )
+    }
     
     // MARK: - Helper Methods
     
     private func updateMenuTimer() {
         let nightStatus = currentNightStatus()
 
-        if nightStatus.isLocked {
+        if nightStatus.isOverrideActive, let state = nightOverrideState {
+            timerMenuItem.title = "\(localized("nightOverrideActiveStatus")) · \(formatStatusBarTime(Int(max(0, state.until.timeIntervalSince(Date())))))"
+        } else if nightStatus.isLocked {
             timerMenuItem.title = "\(localized("nightLockedStatus")) · \(localized("nightUnlockTime")) \(nightStatus.schedule.unlockClockTime.displayString)"
         } else if isPostponeActive {
             // 推迟期间显示推迟倒计时
@@ -1974,17 +2041,52 @@ extension AppDelegate: BreakOverlayDelegate {
 }
 
 extension AppDelegate: NightRestrictionOverlayDelegate {
-    func didRequestNightTestingExit() {
+    func didRequestNightOverride() {
         let status = currentNightStatus()
-        guard case .locked(let unlockTime) = status.phase else {
+        guard case .locked = status.phase else {
             leaveNightLock(startFreshWorkSession: true)
             return
         }
 
-        nightLockOverrideUntil = unlockTime
-        saveSettings()
+        let nightKey = nightOverridePolicy.nightKey(for: status.schedule)
+        let request = nightOverridePolicy.request(overrideNumberForNight: nightOverrideCount(for: nightKey) + 1)
+        eventRecorder.recordNightOverrideRequested(nightKey: nightKey, request: request)
+
+        let text = nightOverrideOverlayText(for: request)
+        for overlay in nightLockOverlays {
+            overlay.configureOverrideRequest(request, text: text)
+        }
+    }
+
+    func didCancelNightOverride(request: NightOverrideRequest) {
+        let status = currentNightStatus()
+        let nightKey = nightOverridePolicy.nightKey(for: status.schedule)
+        eventRecorder.recordNightOverrideCancelled(nightKey: nightKey, request: request)
+        refreshNightLockOverlays()
+    }
+
+    func didGrantNightOverride(reason: NightOverrideReason, request: NightOverrideRequest) {
+        let status = currentNightStatus()
+        guard case .locked = status.phase else {
+            leaveNightLock(startFreshWorkSession: true)
+            return
+        }
+
+        let nightKey = nightOverridePolicy.nightKey(for: status.schedule)
+        let state = nightOverridePolicy.grant(
+            now: Date(),
+            reason: reason,
+            nightKey: nightKey,
+            overrideNumberForNight: request.overrideNumberForNight
+        )
+        nightOverrideState = state
+        saveNightOverrideState()
+        saveNightOverrideCount(request.overrideNumberForNight, nightKey: nightKey)
+        eventRecorder.recordNightOverrideGranted(state: state, request: request)
         leaveNightLock(startFreshWorkSession: true)
         rebuildNightRestrictionMenu()
+        updateMenuTimer()
+        updateStatusBarTitle()
     }
 }
 

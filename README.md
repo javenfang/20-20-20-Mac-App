@@ -51,13 +51,14 @@ at night when you need a real boundary.
 - **Eye health report**: opens with a clear verdict, then shows completion,
   postpone, and recent-day details.
 - **Night screen lock**: gradually tightens screen-use time in the evening, then
-  fully blocks screen use until the configured morning time.
+  fully blocks screen use until the configured morning time; urgent exceptions
+  require a timed Night Override flow.
 - **Local-first**: settings, logs, and statistics stay on your Mac.
 - **5 languages**: English, Simplified Chinese, Spanish, Japanese, and Korean.
 
 ## Installation
 
-1. Download the latest `TwentyGuard-v1.5.3.dmg` from
+1. Download the latest `TwentyGuard-v*.dmg` from
    [Releases](https://github.com/JavenGroup/TwentyGuard/releases).
 2. Open the DMG.
 3. Drag `TwentyGuard.app` into `Applications`.
@@ -75,6 +76,8 @@ Gatekeeper.
 - Open **Eye Health Report** to see whether today's pattern is healthy or which
   behavior needs attention.
 - Enable **Night Screen Lock** if you want the app to enforce an evening cutoff.
+- If you truly need the computer during the lock, use **Night Override** from
+  the lock screen; it requires a wait, a reason, and exact typed confirmation.
 
 ## Build From Source
 

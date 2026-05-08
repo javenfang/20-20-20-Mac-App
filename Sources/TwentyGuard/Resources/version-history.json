@@ -7,8 +7,19 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.5.3",
+  "current_version": "1.5.4",
   "versions": [
+    {
+      "version": "1.5.4",
+      "date": "2026-05-08",
+      "changes": [
+        "Replaced the Night Screen Lock testing escape with a formal Night Override flow",
+        "Added escalating override costs with wait time, reason selection, exact typed confirmation, and a 30-minute unlock window",
+        "Persisted active night overrides across restarts and logged requested, granted, cancelled, and expired override events",
+        "Added night override counts to the health statistics night metric",
+        "Updated all supported localizations and added regression tests for the override policy and localization keys"
+      ]
+    },
     {
       "version": "1.5.3",
       "date": "2026-05-07",

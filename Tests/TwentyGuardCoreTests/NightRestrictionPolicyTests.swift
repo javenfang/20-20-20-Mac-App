@@ -19,8 +19,7 @@ final class NightRestrictionPolicyTests: XCTestCase {
             isEnabled: true,
             windDownStart: ClockTime(hour: 20, minute: 0),
             lockStart: ClockTime(hour: 21, minute: 0),
-            unlockTime: ClockTime(hour: 7, minute: 0),
-            testingExitEnabled: true
+            unlockTime: ClockTime(hour: 7, minute: 0)
         )
     }
 
@@ -30,7 +29,7 @@ final class NightRestrictionPolicyTests: XCTestCase {
             now: date("2026-05-03T22:30:00Z"),
             baseWorkDurationSeconds: 35 * 60,
             settings: NightRestrictionSettings(isEnabled: false),
-            disabledUntil: nil
+            overrideUntil: nil
         )
 
         XCTAssertEqual(status.phase, .normal)
@@ -44,7 +43,7 @@ final class NightRestrictionPolicyTests: XCTestCase {
             now: date("2026-05-03T19:59:00Z"),
             baseWorkDurationSeconds: 35 * 60,
             settings: enabledSettings(),
-            disabledUntil: nil
+            overrideUntil: nil
         )
 
         XCTAssertEqual(status.phase, .normal)
@@ -55,9 +54,9 @@ final class NightRestrictionPolicyTests: XCTestCase {
         let policy = NightRestrictionPolicy(calendar: calendar)
         let settings = enabledSettings()
 
-        let first = policy.status(now: date("2026-05-03T20:05:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, disabledUntil: nil)
-        let second = policy.status(now: date("2026-05-03T20:25:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, disabledUntil: nil)
-        let third = policy.status(now: date("2026-05-03T20:45:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, disabledUntil: nil)
+        let first = policy.status(now: date("2026-05-03T20:05:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, overrideUntil: nil)
+        let second = policy.status(now: date("2026-05-03T20:25:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, overrideUntil: nil)
+        let third = policy.status(now: date("2026-05-03T20:45:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, overrideUntil: nil)
 
         XCTAssertEqual(first.effectiveWorkDurationSeconds, 25 * 60)
         XCTAssertEqual(second.effectiveWorkDurationSeconds, 15 * 60)
@@ -68,9 +67,9 @@ final class NightRestrictionPolicyTests: XCTestCase {
         let policy = NightRestrictionPolicy(calendar: calendar)
         let settings = enabledSettings()
 
-        let first = policy.status(now: date("2026-05-03T20:05:00Z"), baseWorkDurationSeconds: 60 * 60, settings: settings, disabledUntil: nil)
-        let second = policy.status(now: date("2026-05-03T20:25:00Z"), baseWorkDurationSeconds: 60 * 60, settings: settings, disabledUntil: nil)
-        let third = policy.status(now: date("2026-05-03T20:45:00Z"), baseWorkDurationSeconds: 60 * 60, settings: settings, disabledUntil: nil)
+        let first = policy.status(now: date("2026-05-03T20:05:00Z"), baseWorkDurationSeconds: 60 * 60, settings: settings, overrideUntil: nil)
+        let second = policy.status(now: date("2026-05-03T20:25:00Z"), baseWorkDurationSeconds: 60 * 60, settings: settings, overrideUntil: nil)
+        let third = policy.status(now: date("2026-05-03T20:45:00Z"), baseWorkDurationSeconds: 60 * 60, settings: settings, overrideUntil: nil)
 
         XCTAssertEqual(first.effectiveWorkDurationSeconds, 45 * 60)
         XCTAssertEqual(second.effectiveWorkDurationSeconds, 30 * 60)
@@ -81,16 +80,16 @@ final class NightRestrictionPolicyTests: XCTestCase {
         let policy = NightRestrictionPolicy(calendar: calendar)
         let settings = enabledSettings()
 
-        let evening = policy.status(now: date("2026-05-03T21:00:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, disabledUntil: nil)
-        let overnight = policy.status(now: date("2026-05-04T02:00:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, disabledUntil: nil)
-        let unlocked = policy.status(now: date("2026-05-04T07:00:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, disabledUntil: nil)
+        let evening = policy.status(now: date("2026-05-03T21:00:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, overrideUntil: nil)
+        let overnight = policy.status(now: date("2026-05-04T02:00:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, overrideUntil: nil)
+        let unlocked = policy.status(now: date("2026-05-04T07:00:00Z"), baseWorkDurationSeconds: 35 * 60, settings: settings, overrideUntil: nil)
 
         XCTAssertTrue(evening.isLocked)
         XCTAssertTrue(overnight.isLocked)
         XCTAssertEqual(unlocked.phase, .normal)
     }
 
-    func testTestingExitSuppressesLockUntilUnlock() {
+    func testActiveOverrideSuppressesLockUntilUnlock() {
         let policy = NightRestrictionPolicy(calendar: calendar)
         let settings = enabledSettings()
         let overrideUntil = date("2026-05-04T07:00:00Z")
@@ -99,7 +98,7 @@ final class NightRestrictionPolicyTests: XCTestCase {
             now: date("2026-05-03T22:30:00Z"),
             baseWorkDurationSeconds: 35 * 60,
             settings: settings,
-            disabledUntil: overrideUntil
+            overrideUntil: overrideUntil
         )
 
         XCTAssertEqual(status.phase, .normal)
