@@ -239,11 +239,22 @@ class EventRecorder {
 
     // MARK: - Session State
 
-    func saveSessionState(workStartTime: Date?, breakStartTime: Date?, isCustomMode: Bool, pausedBySystemEvent: Bool = false) {
+    func saveSessionState(
+        workStartTime: Date?,
+        breakStartTime: Date?,
+        postponeStartTime: Date? = nil,
+        postponeDuration: TimeInterval = 0,
+        totalPostponedTime: TimeInterval = 0,
+        isCustomMode: Bool,
+        pausedBySystemEvent: Bool = false
+    ) {
         // Save session state for recovery
         logManager.saveSessionState(
             workStartTime: workStartTime,
             breakStartTime: breakStartTime,
+            postponeStartTime: postponeStartTime,
+            postponeDuration: postponeDuration,
+            totalPostponedTime: totalPostponedTime,
             currentWorkDuration: currentWorkDuration,
             currentBreakDuration: currentBreakDuration,
             isCustomMode: isCustomMode,

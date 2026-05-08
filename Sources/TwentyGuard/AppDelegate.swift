@@ -214,6 +214,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let timeSinceLastSave = Date().timeIntervalSince(savedState.lastSaved)
             logManager.logEvent(.appLaunched, context: ["debug": "time_check", "seconds_since_save": "\(Int(timeSinceLastSave))", "paused_by_system": "\(savedState.pausedBySystemEvent)"])
             
+            if savedState.pausedBySystemEvent {
+                logManager.logEvent(.appLaunched, context: ["debug": "session_rejected", "reason": "paused_by_system_event"])
+                logManager.logTimerReset(reason: "paused_by_system_event")
+                return false
+            }
+
+            switch SessionRecoveryPolicy().decision(for: savedState, now: Date()) {
+            case .continuePostpone(let startTime, let duration, let savedTotalPostponedTime):
+                logManager.logEvent(.appLaunched, context: ["debug": "session_valid", "restore": "active_postpone"])
+                workSessionStartTime = nil
+                breakSessionStartTime = nil
+                postponeStartTime = startTime
+                postponeDuration = duration
+                totalPostponedTime = savedTotalPostponedTime
+                print("🔄 恢复推迟休息，剩余 \(Int(postponeTimeRemaining)) 秒")
+                startPostponeTimer()
+                return true
+
+            case .startBreakAfterExpiredPostpone(let savedTotalPostponedTime):
+                logManager.logEvent(.appLaunched, context: ["debug": "session_valid", "restore": "expired_postpone"])
+                workSessionStartTime = nil
+                breakSessionStartTime = nil
+                postponeStartTime = nil
+                postponeDuration = 0
+                totalPostponedTime = savedTotalPostponedTime
+                print("🔄 推迟已过期，立即进入休息")
+                showBreakOverlay()
+                return true
+
+            case .noPostpone:
+                break
+            }
+
             // 使用新的恢复逻辑
             if !savedState.shouldRestoreAfterSystemEvent() {
                 let reason = savedState.pausedBySystemEvent ? "paused_by_system_event" : "session_too_old"
@@ -1320,7 +1353,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusBarTitle()
 
         // 检查推迟时间是否结束
-        if isPostponeActive && postponeTimeRemaining <= 0 {
+        if postponeStartTime != nil && postponeTimeRemaining <= 0 {
             // 推迟时间结束，清除推迟状态，开始正常休息
             print("⏰ Postpone time finished, showing break overlay")
             workTimer?.invalidate()
@@ -1666,7 +1699,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let totalSeconds = Int(postponeTimeRemaining)
             let minutes = totalSeconds / 60
             let secs = totalSeconds % 60
-            timerMenuItem.title = String(format: "%@: %02d:%02d (%@)", localized("screenUsage"), minutes, secs, localized("postponed"))
+            timerMenuItem.title = String(format: "%@: %02d:%02d", localized("postponeBreakCountdown"), minutes, secs)
         } else if case .windDown(_, _, _, let lockStart, _) = nightStatus.phase {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
@@ -1680,6 +1713,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logManager.saveSessionState(
             workStartTime: workSessionStartTime,
             breakStartTime: breakSessionStartTime,
+            postponeStartTime: postponeStartTime,
+            postponeDuration: postponeDuration,
+            totalPostponedTime: totalPostponedTime,
             currentWorkDuration: currentWorkDuration,
             currentBreakDuration: currentBreakDuration,
             isCustomMode: isCustomMode
@@ -1915,22 +1951,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 保持原始工作时长不变，不保存临时状态到会话文件
         logManager.logWorkStarted(mode: "postponed_\(minutes)min")
-        
-        // 先清理现有的计时器，避免冲突
+
+        updateStatusBarTitle()
+        updateMenuTimer()
+        saveCurrentSessionState()
+        startPostponeTimer()
+    }
+
+    private func startPostponeTimer() {
         workTimer?.invalidate()
         workTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            
+
             // 更新UI显示推迟倒计时
             self.updateStatusBarTitle()
             self.updateMenuTimer()
-            
+
             // 检查推迟时间是否结束
             if self.postponeTimeRemaining <= 0 {
                 // 推迟时间结束，清除推迟状态，开始正常休息
                 self.workTimer?.invalidate()
+                self.workTimer = nil
                 self.postponeStartTime = nil
                 self.postponeDuration = 0
+                self.saveCurrentSessionState()
                 self.showBreakOverlay()
             }
         }
@@ -1994,6 +2038,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logManager.saveSessionState(
             workStartTime: workSessionStartTime,
             breakStartTime: breakSessionStartTime,
+            postponeStartTime: postponeStartTime,
+            postponeDuration: postponeDuration,
+            totalPostponedTime: totalPostponedTime,
             currentWorkDuration: currentWorkDuration,
             currentBreakDuration: currentBreakDuration,
             isCustomMode: isCustomMode,

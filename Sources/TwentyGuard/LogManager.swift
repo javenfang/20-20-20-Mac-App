@@ -48,27 +48,6 @@ struct NightOverrideSummary: Equatable {
     let totalMinutes: Int
 }
 
-struct SessionState: Codable {
-    let workStartTime: Date?
-    let breakStartTime: Date?
-    let currentWorkDuration: Int
-    let currentBreakDuration: Int
-    let isCustomMode: Bool
-    let lastSaved: Date
-    let pausedBySystemEvent: Bool  // 新增：是否由于系统事件被暂停
-    
-    func isValid() -> Bool {
-        // 会话有效期：30分钟内
-        return Date().timeIntervalSince(lastSaved) < 30 * 60
-    }
-    
-    func shouldRestoreAfterSystemEvent() -> Bool {
-        // 如果是由于系统事件暂停的，并且时间不超过2小时，可以考虑恢复
-        // 但屏保/睡眠本身相当于休息，所以通常应该开始新会话
-        return !pausedBySystemEvent && Date().timeIntervalSince(lastSaved) < 10 * 60
-    }
-}
-
 // MARK: - Log Manager
 
 class LogManager {
@@ -121,6 +100,9 @@ class LogManager {
     func saveSessionState(
         workStartTime: Date?,
         breakStartTime: Date?,
+        postponeStartTime: Date? = nil,
+        postponeDuration: TimeInterval = 0,
+        totalPostponedTime: TimeInterval = 0,
         currentWorkDuration: Int,
         currentBreakDuration: Int,
         isCustomMode: Bool,
@@ -129,6 +111,9 @@ class LogManager {
         let state = SessionState(
             workStartTime: workStartTime,
             breakStartTime: breakStartTime,
+            postponeStartTime: postponeStartTime,
+            postponeDuration: postponeDuration,
+            totalPostponedTime: totalPostponedTime,
             currentWorkDuration: currentWorkDuration,
             currentBreakDuration: currentBreakDuration,
             isCustomMode: isCustomMode,
@@ -162,7 +147,11 @@ class LogManager {
                 return nil
             }
             
-            logEvent(.appLaunched, context: ["restore_success": "true", "workStartTime": state.workStartTime?.description ?? "nil"])
+            logEvent(.appLaunched, context: [
+                "restore_success": "true",
+                "workStartTime": state.workStartTime?.description ?? "nil",
+                "postponeStartTime": state.postponeStartTime?.description ?? "nil"
+            ])
             return state
             
         } catch {

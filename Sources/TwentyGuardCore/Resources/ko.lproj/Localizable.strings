@@ -18,6 +18,7 @@
 "postpone2" = "2분 연기 (⌘2)";
 "postpone5" = "5분 연기 (⌘5)";
 "postponed" = "연기";
+"postponeBreakCountdown" = "휴식 연기 중";
 "postpone_status" = "%d분 연기됨, %d분 남음";
 "appAlreadyRunning" = "앱이 이미 실행 중입니다";
 "appAlreadyRunningMessage" = "TwentyGuard가 이미 실행 중입니다. 동시에 하나의 인스턴스만 실행할 수 있습니다.";

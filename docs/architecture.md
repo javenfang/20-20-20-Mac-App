@@ -1,6 +1,6 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.5.4
+> **文档版本**: v1.5.5
 > **最后更新**: 2026-05-08
 > **维护者**: Javen Fang (@javenfang)
 
@@ -126,6 +126,7 @@ Sources/TwentyGuard/
 - 通过计算属性实时计算剩余时间（避免累积误差）
 - ⭐ v1.2.0 更新：默认模式推迟总计最多 5 分钟，自定义模式可选 5/10 分钟
 - ⭐ v1.5.4 更新：夜间禁用移除测试出口，改为带等待、原因和确认句的正式破例流程
+- ⭐ v1.5.5 修复：推迟休息状态持久化，应用重启后不再误开新工作周期
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -368,6 +369,7 @@ stateDiagram-v2
 
 **实现要点**:
 - 使用独立的 `postponeStartTime` 和 `postponeDuration` 追踪推迟状态
+- `SessionState` 持久化推迟开始时间、推迟时长和累计推迟，避免应用重启后误开新工作周期
 - `currentWorkDuration` 保持不变（避免影响持久化设置）
 - 推迟计时器到期后，自动重新显示休息窗口
 
@@ -467,8 +469,9 @@ graph TB
 
 ### 6.3 SessionState - 会话状态
 
-**数据结构** ([`LogManager.swift:41-60`](../Sources/TwentyGuard/LogManager.swift#L41-L60)):
+**数据结构** ([`SessionState.swift`](../Sources/TwentyGuardCore/SessionState.swift)):
 - `workStartTime` / `breakStartTime`: 会话开始时间
+- `postponeStartTime` / `postponeDuration` / `totalPostponedTime`: 正在进行的推迟休息和累计推迟成本
 - `currentWorkDuration` / `currentBreakDuration`: 当前时长设置
 - `pausedBySystemEvent`: 是否因系统事件暂停
 - `lastSaved`: 保存时间（用于判断有效性，30分钟内有效）
@@ -477,9 +480,10 @@ graph TB
 - 每 10 秒自动快照 (`stateSnapshotTimer`)
 - 会话状态变更时、系统事件发生时
 
-**恢复逻辑** ([`AppDelegate.swift:308-380`](../Sources/TwentyGuard/AppDelegate.swift#L308-L380)):
+**恢复逻辑** ([`AppDelegate.swift`](../Sources/TwentyGuard/AppDelegate.swift)):
 - 验证会话有效性（时间 < 30分钟，且非系统事件暂停）
-- 恢复 `workSessionStartTime` 继续会话，或启动新会话
+- 若存在有效推迟休息：继续推迟倒计时；若推迟已过期：立即进入应有休息
+- 否则恢复 `workSessionStartTime` 继续会话，或启动新会话
 
 ### 6.4 SQLite + JSONL - 历史数据
 
@@ -589,7 +593,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.5.4</string>
+<string>1.5.5</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -620,8 +624,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.5.4 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.5.4.dmg`，再更新本节发布验证结果。
+v1.5.5 当前为功能修复版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.5.5.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -848,6 +852,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.5.2 | 2026-05-07 | 多语言系统迁移到 SwiftPM `.lproj/Localizable.strings` 标准资源；补齐夜间禁用和统计面板翻译；新增多语言完整性测试；发布 Developer ID 签名并公证的 DMG |
 | v1.5.3 | 2026-05-07 | 修复分发版启动时 SwiftPM resource bundle 查找路径导致的崩溃；补齐标准 app bundle 元数据；新增 app/DMG 打包结构校验和资源查找回归测试；发布签名公证 DMG |
 | v1.5.4 | 2026-05-08 | 夜间禁用移除测试出口，新增正式破例状态机、递增等待成本、确认句、事件日志、统计汇总和本地化回归测试 |
+| v1.5.5 | 2026-05-08 | 推迟休息状态纳入 SessionState，重启后继续推迟倒计时或立即恢复欠下的休息；菜单栏推迟文案从“屏幕使用”改为“推迟休息”；新增会话恢复回归测试 |
 
 ### B. 相关文档
 
@@ -864,4 +869,4 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 ---
 
 **最后更新**: 2026-05-08
-**文档版本**: v1.5.4
+**文档版本**: v1.5.5

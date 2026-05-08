@@ -18,6 +18,7 @@
 "postpone2" = "2分延期 (⌘2)";
 "postpone5" = "5分延期 (⌘5)";
 "postponed" = "延期";
+"postponeBreakCountdown" = "休憩延期中";
 "postpone_status" = "%d分延期済み、残り%d分";
 "appAlreadyRunning" = "アプリはすでに実行中です";
 "appAlreadyRunningMessage" = "TwentyGuard はすでに実行中です。同時に実行できるインスタンスは1つだけです。";

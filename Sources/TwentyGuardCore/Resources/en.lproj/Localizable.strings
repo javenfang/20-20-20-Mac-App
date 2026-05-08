@@ -18,6 +18,7 @@
 "postpone2" = "Postpone 2 minutes (⌘2)";
 "postpone5" = "Postpone 5 minutes (⌘5)";
 "postponed" = "Postponed";
+"postponeBreakCountdown" = "Postponed Break";
 "postpone_status" = "Postponed %d min, %d min left";
 "appAlreadyRunning" = "App Already Running";
 "appAlreadyRunningMessage" = "TwentyGuard is already running. Only one instance can run at a time.";

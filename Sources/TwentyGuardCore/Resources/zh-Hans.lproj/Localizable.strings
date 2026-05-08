@@ -18,6 +18,7 @@
 "postpone2" = "推迟 2 分钟 (⌘2)";
 "postpone5" = "推迟 5 分钟 (⌘5)";
 "postponed" = "推迟";
+"postponeBreakCountdown" = "推迟休息";
 "postpone_status" = "已推迟 %d 分钟，剩余可推迟 %d 分钟";
 "appAlreadyRunning" = "应用已在运行";
 "appAlreadyRunningMessage" = "TwentyGuard 已经在运行中，只能同时运行一个实例。";

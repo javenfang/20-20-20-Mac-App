@@ -18,6 +18,7 @@
 "postpone2" = "Posponer 2 minutos (⌘2)";
 "postpone5" = "Posponer 5 minutos (⌘5)";
 "postponed" = "Pospuesto";
+"postponeBreakCountdown" = "Descanso aplazado";
 "postpone_status" = "Pospuesto %d min, quedan %d min";
 "appAlreadyRunning" = "La aplicación ya se está ejecutando";
 "appAlreadyRunningMessage" = "TwentyGuard ya está ejecutándose. Solo puede ejecutarse una instancia a la vez.";

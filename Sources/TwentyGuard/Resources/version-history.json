@@ -7,8 +7,19 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.5.4",
+  "current_version": "1.5.5",
   "versions": [
+    {
+      "version": "1.5.5",
+      "date": "2026-05-08",
+      "changes": [
+        "Fixed postponed breaks restoring as a fresh work cycle after app restart",
+        "Persisted postpone start time, postpone duration, and cumulative postponed time in session state",
+        "Restored active postpone countdowns after restart, or immediately resumed the owed break when the postpone already elapsed",
+        "Clarified the menu bar title during postponed breaks",
+        "Added regression tests for postponed-break session recovery"
+      ]
+    },
     {
       "version": "1.5.4",
       "date": "2026-05-08",
