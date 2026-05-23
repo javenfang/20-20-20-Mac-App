@@ -14,6 +14,19 @@ public enum StatsSessionStatus: String, Codable, Equatable, Sendable {
     case unknown
 }
 
+public enum StatsEventType: String, Codable, Equatable, Sendable {
+    case appLaunched = "app_launched"
+    case appTerminated = "app_terminated"
+    case temporaryDisableStarted = "temporary_disable_started"
+    case temporaryDisableEnded = "temporary_disable_ended"
+    case temporaryDisableExpired = "temporary_disable_expired"
+    case nightOverrideRequested = "night_override_requested"
+    case nightOverrideGranted = "night_override_granted"
+    case nightOverrideCancelled = "night_override_cancelled"
+    case nightOverrideExpired = "night_override_expired"
+    case unknown
+}
+
 public struct StatsPostponeRecord: Equatable, Sendable {
     public let durationSeconds: Int
     public let startTime: Date
@@ -47,6 +60,34 @@ public struct StatsBreakRecord: Equatable, Sendable {
         self.startTime = startTime
         self.endTime = endTime
         self.status = status
+    }
+}
+
+public struct StatsEventRecord: Equatable, Sendable {
+    public let id: Int64
+    public let type: StatsEventType
+    public let timestamp: Date
+    public let durationSeconds: Int?
+    public let endTime: Date?
+    public let nightKey: String?
+    public let context: [String: String]
+
+    public init(
+        id: Int64,
+        type: StatsEventType,
+        timestamp: Date,
+        durationSeconds: Int?,
+        endTime: Date?,
+        nightKey: String?,
+        context: [String: String]
+    ) {
+        self.id = id
+        self.type = type
+        self.timestamp = timestamp
+        self.durationSeconds = durationSeconds
+        self.endTime = endTime
+        self.nightKey = nightKey
+        self.context = context
     }
 }
 
@@ -142,6 +183,12 @@ public struct StatsDaySnapshot: Equatable, Sendable {
     public let postponesByMinutes: [Int: Int]
     public let totalWorkSeconds: Int
     public let longestWorkSeconds: Int
+    public let appExitCount: Int
+    public let appOffSeconds: Int
+    public let temporaryDisableCount: Int
+    public let temporaryDisableSeconds: Int
+    public let nightOverrideCount: Int
+    public let nightOverrideSeconds: Int
     public let quality: StatsQualitySummary
 
     public init(
@@ -154,6 +201,12 @@ public struct StatsDaySnapshot: Equatable, Sendable {
         postponesByMinutes: [Int: Int],
         totalWorkSeconds: Int,
         longestWorkSeconds: Int,
+        appExitCount: Int = 0,
+        appOffSeconds: Int = 0,
+        temporaryDisableCount: Int = 0,
+        temporaryDisableSeconds: Int = 0,
+        nightOverrideCount: Int = 0,
+        nightOverrideSeconds: Int = 0,
         quality: StatsQualitySummary
     ) {
         self.date = date
@@ -165,6 +218,12 @@ public struct StatsDaySnapshot: Equatable, Sendable {
         self.postponesByMinutes = postponesByMinutes
         self.totalWorkSeconds = totalWorkSeconds
         self.longestWorkSeconds = longestWorkSeconds
+        self.appExitCount = appExitCount
+        self.appOffSeconds = appOffSeconds
+        self.temporaryDisableCount = temporaryDisableCount
+        self.temporaryDisableSeconds = temporaryDisableSeconds
+        self.nightOverrideCount = nightOverrideCount
+        self.nightOverrideSeconds = nightOverrideSeconds
         self.quality = quality
     }
 
@@ -178,11 +237,20 @@ public struct StatsDaySnapshot: Equatable, Sendable {
         return Double(postponedSessions) / Double(breakOpportunities)
     }
 
+    public var exceptionCount: Int {
+        appExitCount + temporaryDisableCount + nightOverrideCount
+    }
+
+    public var hasProtectionBypass: Bool {
+        exceptionCount > 0
+    }
+
     public var isHealthyDay: Bool {
         breakOpportunities > 0 &&
             breakCompletionRate >= 0.8 &&
             postponeSessionRate <= 0.3 &&
             longestWorkSeconds <= 90 * 60 &&
+            !hasProtectionBypass &&
             quality.excludedStaleSessions == 0
     }
 }
@@ -218,8 +286,24 @@ public struct StatsWeekSnapshot: Equatable, Sendable {
         days.reduce(0) { $0 + $1.totalPostpones }
     }
 
+    public var totalAppExits: Int {
+        days.reduce(0) { $0 + $1.appExitCount }
+    }
+
+    public var totalAppOffSeconds: Int {
+        days.reduce(0) { $0 + $1.appOffSeconds }
+    }
+
+    public var totalTemporaryDisableSeconds: Int {
+        days.reduce(0) { $0 + $1.temporaryDisableSeconds }
+    }
+
+    public var totalNightOverrideSeconds: Int {
+        days.reduce(0) { $0 + $1.nightOverrideSeconds }
+    }
+
     public var activeDays: Int {
-        days.filter { $0.workSessions > 0 || $0.breakOpportunities > 0 }.count
+        days.filter { $0.workSessions > 0 || $0.breakOpportunities > 0 || $0.exceptionCount > 0 }.count
     }
 
     public var healthyDays: Int {
@@ -238,15 +322,80 @@ public struct StatsWeekSnapshot: Equatable, Sendable {
     }
 }
 
+public struct StatsMonthSnapshot: Equatable, Sendable {
+    public let monthStart: Date
+    public let previousMonthStart: Date
+    public let nextMonthStart: Date
+    public let days: [StatsDaySnapshot]
+
+    public init(monthStart: Date, previousMonthStart: Date, nextMonthStart: Date, days: [StatsDaySnapshot]) {
+        self.monthStart = monthStart
+        self.previousMonthStart = previousMonthStart
+        self.nextMonthStart = nextMonthStart
+        self.days = days
+    }
+
+    public var totalWorkSeconds: Int {
+        days.reduce(0) { $0 + $1.totalWorkSeconds }
+    }
+
+    public var totalBreakOpportunities: Int {
+        days.reduce(0) { $0 + $1.breakOpportunities }
+    }
+
+    public var totalCompletedBreaks: Int {
+        days.reduce(0) { $0 + $1.completedBreaks }
+    }
+
+    public var activeDays: Int {
+        days.filter { $0.workSessions > 0 || $0.breakOpportunities > 0 || $0.exceptionCount > 0 }.count
+    }
+
+    public var healthyDays: Int {
+        days.filter(\.isHealthyDay).count
+    }
+
+    public var exceptionDays: Int {
+        days.filter { $0.exceptionCount > 0 }.count
+    }
+
+    public var breakCompletionRate: Double {
+        guard totalBreakOpportunities > 0 else { return 0 }
+        return Double(totalCompletedBreaks) / Double(totalBreakOpportunities)
+    }
+
+    public var appExitCount: Int {
+        days.reduce(0) { $0 + $1.appExitCount }
+    }
+
+    public var appOffSeconds: Int {
+        days.reduce(0) { $0 + $1.appOffSeconds }
+    }
+
+    public var temporaryDisableSeconds: Int {
+        days.reduce(0) { $0 + $1.temporaryDisableSeconds }
+    }
+
+    public var nightOverrideSeconds: Int {
+        days.reduce(0) { $0 + $1.nightOverrideSeconds }
+    }
+
+    public var longestWorkSeconds: Int {
+        days.map(\.longestWorkSeconds).max() ?? 0
+    }
+}
+
 public struct StatsDashboardSnapshot: Equatable, Sendable {
     public let generatedAt: Date
     public let today: StatsDaySnapshot
     public let week: StatsWeekSnapshot
+    public let month: StatsMonthSnapshot
 
-    public init(generatedAt: Date, today: StatsDaySnapshot, week: StatsWeekSnapshot) {
+    public init(generatedAt: Date, today: StatsDaySnapshot, week: StatsWeekSnapshot, month: StatsMonthSnapshot) {
         self.generatedAt = generatedAt
         self.today = today
         self.week = week
+        self.month = month
     }
 }
 
@@ -271,22 +420,27 @@ public struct StatsEngine: Sendable {
         self.staleSessionGraceSeconds = staleSessionGraceSeconds
     }
 
-    public func dashboard(from records: [StatsSessionRecord]) -> StatsDashboardSnapshot {
+    public func dashboard(from records: [StatsSessionRecord], events: [StatsEventRecord] = []) -> StatsDashboardSnapshot {
         let todayStart = calendar.startOfDay(for: now)
         let weekDays = (0..<7).reversed().compactMap { offset in
             calendar.date(byAdding: .day, value: -offset, to: todayStart)
         }
-        let days = weekDays.map { daySnapshot(for: $0, from: records) }
-        let today = days.last ?? daySnapshot(for: todayStart, from: records)
+        let days = weekDays.map { daySnapshot(for: $0, from: records, events: events) }
+        let today = days.last ?? daySnapshot(for: todayStart, from: records, events: events)
 
         return StatsDashboardSnapshot(
             generatedAt: now,
             today: today,
-            week: StatsWeekSnapshot(days: days)
+            week: StatsWeekSnapshot(days: days),
+            month: monthSnapshot(for: now, from: records, events: events)
         )
     }
 
     public func daySnapshot(for day: Date, from records: [StatsSessionRecord]) -> StatsDaySnapshot {
+        daySnapshot(for: day, from: records, events: [])
+    }
+
+    public func daySnapshot(for day: Date, from records: [StatsSessionRecord], events: [StatsEventRecord]) -> StatsDaySnapshot {
         let dayStart = calendar.startOfDay(for: day)
         guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else {
             return emptyDay(date: dayStart)
@@ -345,6 +499,13 @@ public struct StatsEngine: Sendable {
             }
         }
 
+        let eventSummary = summarizeEvents(
+            events,
+            dayStart: dayStart,
+            dayEnd: dayEnd,
+            hasActiveProtectionDay: workSessions > 0 || breakOpportunities > 0
+        )
+
         return StatsDaySnapshot(
             date: dayStart,
             workSessions: workSessions,
@@ -355,7 +516,37 @@ public struct StatsEngine: Sendable {
             postponesByMinutes: postponesByMinutes,
             totalWorkSeconds: totalWorkSeconds,
             longestWorkSeconds: longestWorkSeconds,
+            appExitCount: eventSummary.appExitCount,
+            appOffSeconds: eventSummary.appOffSeconds,
+            temporaryDisableCount: eventSummary.temporaryDisableCount,
+            temporaryDisableSeconds: eventSummary.temporaryDisableSeconds,
+            nightOverrideCount: eventSummary.nightOverrideCount,
+            nightOverrideSeconds: eventSummary.nightOverrideSeconds,
             quality: quality
+        )
+    }
+
+    public func monthSnapshot(
+        for monthContaining: Date,
+        from records: [StatsSessionRecord],
+        events: [StatsEventRecord] = []
+    ) -> StatsMonthSnapshot {
+        let components = calendar.dateComponents([.year, .month], from: monthContaining)
+        let monthStart = calendar.date(from: components) ?? calendar.startOfDay(for: monthContaining)
+        let previous = calendar.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
+        let next = calendar.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
+        let range = calendar.range(of: .day, in: .month, for: monthStart) ?? 1..<2
+        let days = range.compactMap { day -> Date? in
+            calendar.date(byAdding: .day, value: day - 1, to: monthStart)
+        }.map { day in
+            daySnapshot(for: day, from: records, events: events)
+        }
+
+        return StatsMonthSnapshot(
+            monthStart: monthStart,
+            previousMonthStart: previous,
+            nextMonthStart: next,
+            days: days
         )
     }
 
@@ -372,6 +563,87 @@ public struct StatsEngine: Sendable {
             longestWorkSeconds: 0,
             quality: StatsQualitySummary()
         )
+    }
+
+    private struct EventSummary {
+        var appExitCount = 0
+        var appOffSeconds = 0
+        var temporaryDisableCount = 0
+        var temporaryDisableSeconds = 0
+        var nightOverrideCount = 0
+        var nightOverrideSeconds = 0
+    }
+
+    private func summarizeEvents(
+        _ events: [StatsEventRecord],
+        dayStart: Date,
+        dayEnd: Date,
+        hasActiveProtectionDay: Bool
+    ) -> EventSummary {
+        var summary = EventSummary()
+        let dayNightKey = formatNightKey(dayStart)
+
+        if hasActiveProtectionDay {
+            let sortedEvents = events.sorted { $0.timestamp < $1.timestamp }
+            for (index, event) in sortedEvents.enumerated()
+                where event.type == .appTerminated && event.timestamp >= dayStart && event.timestamp < dayEnd {
+                summary.appExitCount += 1
+                if let launch = sortedEvents[(index + 1)...].first(where: { $0.type == .appLaunched && $0.timestamp > event.timestamp }) {
+                    summary.appOffSeconds += overlapSeconds(
+                        start: event.timestamp,
+                        end: launch.timestamp,
+                        rangeStart: dayStart,
+                        rangeEnd: dayEnd
+                    )
+                }
+            }
+        }
+
+        for event in events where event.timestamp >= dayStart && event.timestamp < dayEnd {
+            switch event.type {
+            case .temporaryDisableStarted:
+                summary.temporaryDisableCount += 1
+                summary.temporaryDisableSeconds += durationSeconds(for: event)
+            case .nightOverrideGranted where event.nightKey == nil:
+                summary.nightOverrideCount += 1
+                summary.nightOverrideSeconds += durationSeconds(for: event)
+            case .appLaunched, .appTerminated, .temporaryDisableEnded, .temporaryDisableExpired,
+                 .nightOverrideRequested, .nightOverrideGranted, .nightOverrideCancelled,
+                 .nightOverrideExpired, .unknown:
+                break
+            }
+        }
+
+        for event in events where event.type == .nightOverrideGranted && event.nightKey == dayNightKey {
+            summary.nightOverrideCount += 1
+            summary.nightOverrideSeconds += durationSeconds(for: event)
+        }
+
+        return summary
+    }
+
+    private func durationSeconds(for event: StatsEventRecord) -> Int {
+        if let seconds = event.durationSeconds, seconds > 0 {
+            return seconds
+        }
+        if let endTime = event.endTime {
+            return max(0, Int(endTime.timeIntervalSince(event.timestamp)))
+        }
+        return 0
+    }
+
+    private func overlapSeconds(start: Date, end: Date, rangeStart: Date, rangeEnd: Date) -> Int {
+        let clippedStart = max(start, rangeStart)
+        let clippedEnd = min(end, rangeEnd)
+        return max(0, Int(clippedEnd.timeIntervalSince(clippedStart)))
+    }
+
+    private func formatNightKey(_ date: Date) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        let year = components.year ?? 0
+        let month = components.month ?? 0
+        let day = components.day ?? 0
+        return String(format: "%04d-%02d-%02d", year, month, day)
     }
 
     private func effectiveDuration(for record: StatsSessionRecord) -> Int {

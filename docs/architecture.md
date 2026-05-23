@@ -1,6 +1,6 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.6.0
+> **文档版本**: v1.7.2
 > **最后更新**: 2026-05-23
 > **维护者**: Javen Fang (@javenfang)
 
@@ -97,7 +97,7 @@ Sources/TwentyGuard/
 ├── EventRecorder.swift           # 事件记录器 (231行)
 ├── StatsDatabase.swift           # SQLite数据库 (716行)
 ├── LogManager.swift              # JSON日志 (373行)
-├── SimpleStatsWindow.swift       # 统计窗口 (363行)
+├── StatsDashboardWindow.swift    # 当前健康统计窗口
 ├── HealthAnalyzer.swift          # 健康分析 (未使用)
 └── Resources/                    # 资源文件
     ├── statusbar_icon.png        # 16x16 菜单栏图标
@@ -129,6 +129,9 @@ Sources/TwentyGuard/
 - ⭐ v1.5.4 更新：夜间禁用移除测试出口，改为带等待、原因和确认句的正式破例流程
 - ⭐ v1.5.5 修复：推迟休息状态持久化，应用重启后不再误开新工作周期
 - ⭐ v1.6.0 新增：会议等特殊场合可临时禁用 1 小时，但夜间禁用和夜间破例优先
+- ⭐ v1.7.0 新增：健康统计改为保护遵守视角，长期统计 App 退出、临时禁用和夜间破例，并提供月度切换视图
+- ⭐ v1.7.1 调整：统计窗口顶部拆分「概览 / 月度」tab，月度切换只刷新月度页内容
+- ⭐ v1.7.2 修复：推迟休息统计记录到当前未完成休息所属的 work session，而不是只查 active work session
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -179,15 +182,15 @@ Sources/TwentyGuard/
 
 **职责**:
 - 统一事件记录入口
-- 协调 SQLite 和 JSON 日志
+- 协调 SQLite 长期统计事件和 JSONL 调试日志
 - 会话状态管理
 - 数据清理调度
 
 **双重记录系统**:
 ```mermaid
 graph LR
-    A[EventRecorder] --> B[StatsDatabase<br/>SQLite]
-    A --> C[LogManager<br/>JSON日志]
+    A[EventRecorder] --> B[StatsDatabase<br/>SQLite sessions + stats_events]
+    A --> C[LogManager<br/>JSONL日志]
 
     B --> D[长期统计数据<br/>90天]
     C --> E[调试日志<br/>30天]
@@ -210,7 +213,8 @@ graph LR
 
 **职责**:
 - 会话数据持久化
-- 每日统计汇总
+- 长期统计事件持久化
+- 今日、近 7 天、月度统计聚合
 - 数据查询与清理
 
 **数据库表结构**:
@@ -219,32 +223,30 @@ graph LR
 -- 会话记录表
 CREATE TABLE sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL,                -- 'work' | 'break'
-    start_time TEXT NOT NULL,
-    end_time TEXT,
-    planned_duration INTEGER,
-    actual_duration INTEGER,
+    type TEXT CHECK(type IN ('work')) NOT NULL,
+    start_time REAL NOT NULL,
+    end_time REAL,
+    status TEXT CHECK(status IN ('active', 'completed', 'interrupted')) DEFAULT 'active',
+    planned_duration INTEGER DEFAULT 1800,
+    actual_work_duration INTEGER,
     postpone_count INTEGER DEFAULT 0,
-    postpone_1min INTEGER DEFAULT 0,
-    postpone_2min INTEGER DEFAULT 0,
-    postpone_5min INTEGER DEFAULT 0,
-    total_postpone_duration INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'active'       -- 'active' | 'completed' | 'interrupted'
+    postpone_total_duration INTEGER DEFAULT 0,
+    postpones TEXT,
+    break_info TEXT,
+    break_completed INTEGER DEFAULT 0,
+    created_at REAL DEFAULT (strftime('%s', 'now'))
 );
 
--- 每日统计表
-CREATE TABLE daily_stats (
-    date TEXT PRIMARY KEY,
-    work_sessions INTEGER,
-    break_sessions INTEGER,
-    total_postpones INTEGER,
-    postpone_1min_count INTEGER,
-    postpone_2min_count INTEGER,
-    postpone_5min_count INTEGER,
-    total_work_minutes INTEGER,
-    total_break_minutes INTEGER,
-    longest_work_minutes INTEGER,
-    avg_postpones_per_session REAL
+-- 长期统计事件表
+CREATE TABLE stats_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    duration_seconds INTEGER,
+    end_timestamp REAL,
+    night_key TEXT,
+    context TEXT,
+    created_at REAL DEFAULT (strftime('%s', 'now'))
 );
 ```
 
@@ -275,6 +277,7 @@ CREATE TABLE daily_stats (
 - 系统事件: `system_sleep`, `screensaver_start`, etc.
 - 应用事件: `app_launched`, `settings_changed`, etc.
 - 夜间破例: `night_override_requested`, `night_override_granted`, `night_override_cancelled`, `night_override_expired`
+- 临时禁用: `temporary_disable_started`, `temporary_disable_ended`, `temporary_disable_expired`
 
 ---
 
@@ -510,8 +513,11 @@ graph TB
 **SQLite**: 结构化统计数据，全部保留
 **JSONL**: 调试日志，30天保留期
 
+v1.7.0 后，`stats_events` 是 App 退出、临时禁用和夜间破例的长期统计源。
+JSONL 仍用于事件审计、调试和崩溃恢复，但月度统计不依赖 30 天 JSONL 保留期。
+
 **数据清理**:
-- SQLite: 应用启动时清理 ([`EventRecorder.swift:131`](../Sources/TwentyGuard/EventRecorder.swift#L131))
+- SQLite: 应用启动时清理 `sessions` 和 `stats_events`
 - JSONL: 后台异步清理 ([`LogManager.swift:183-187`](../Sources/TwentyGuard/LogManager.swift#L183-L187))
 
 ---
@@ -613,7 +619,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.6.0</string>
+<string>1.7.2</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -644,8 +650,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.6.0 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.6.0.dmg`，再更新本节发布验证结果。
+v1.7.2 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.7.2.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -874,6 +880,9 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.5.4 | 2026-05-08 | 夜间禁用移除测试出口，新增正式破例状态机、递增等待成本、确认句、事件日志、统计汇总和本地化回归测试 |
 | v1.5.5 | 2026-05-08 | 推迟休息状态纳入 SessionState，重启后继续推迟倒计时或立即恢复欠下的休息；菜单栏推迟文案从“屏幕使用”改为“推迟休息”；新增会话恢复回归测试 |
 | v1.6.0 | 2026-05-23 | 新增临时禁用 1 小时状态和策略；暂停当前工作/休息/推迟计时并在到期后开启新工作周期；夜间禁用和夜间破例优先；新增策略与本地化测试 |
+| v1.7.0 | 2026-05-23 | 健康统计重构为保护遵守视角；新增 `stats_events` 长期记录 App 退出、临时禁用和夜间破例；新增月度切换、日历状态、选中日期明细和例外标记 |
+| v1.7.1 | 2026-05-23 | 统计窗口拆分为「概览 / 月度」顶部 tab；月度页独立承载日历和日期明细；月份切换不再重建默认概览页 |
+| v1.7.2 | 2026-05-23 | 修复推迟统计落库目标错误：break 已开始后 work session 已完成，推迟现在优先挂到当前未完成 break 所属会话；新增 app 层 SQLite 回归测试 |
 
 ### B. 相关文档
 
@@ -890,4 +899,4 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 ---
 
 **最后更新**: 2026-05-23
-**文档版本**: v1.6.0
+**文档版本**: v1.7.2

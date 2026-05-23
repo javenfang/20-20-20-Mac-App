@@ -94,6 +94,31 @@ final class AppLocalizationTests: XCTestCase {
         }
     }
 
+    func testProtectionStatsLocalizationsAreComplete() {
+        let requiredKeys: Set<String> = [
+            "statsBreakDisciplineMetric",
+            "statsBreakDisciplineDetailFormat",
+            "statsExceptionMetric",
+            "statsExceptionColumn",
+            "statsExceptionNone",
+            "statsExceptionCountFormat",
+            "statsExceptionDetailFormat",
+            "statsNightBoundaryMetric",
+            "statsSummaryTab",
+            "statsMonthTab",
+            "statsMonthSummaryFormat",
+            "statsMonthNoSelectedDay",
+            "statsSelectedDayDetailFormat",
+            "verdictProtectionBypassedTitle",
+            "verdictProtectionBypassedReasonFormat"
+        ]
+
+        for language in AppLocalization.supportedLanguageCodes {
+            let keys = AppLocalization.localizationKeys(language: language)
+            XCTAssertTrue(requiredKeys.isSubset(of: keys), "\(language) must include protection statistics keys")
+        }
+    }
+
     func testFindsCoreResourceBundleInStandardAppResourcesDirectory() throws {
         let appURL = temporaryDirectory()
             .appendingPathComponent("TwentyGuard.app", isDirectory: true)

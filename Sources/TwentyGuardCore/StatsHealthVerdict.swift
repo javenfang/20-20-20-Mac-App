@@ -66,6 +66,17 @@ public struct StatsHealthVerdictEvaluator: Sendable {
             )
         }
 
+        if day.hasProtectionBypass {
+            return StatsHealthVerdict(
+                title: localize("verdictProtectionBypassedTitle"),
+                reason: String(
+                    format: localize("verdictProtectionBypassedReasonFormat"),
+                    day.exceptionCount
+                ),
+                severity: .warning
+            )
+        }
+
         if day.isHealthyDay {
             return StatsHealthVerdict(
                 title: localize("verdictHealthyTitle"),

@@ -162,6 +162,7 @@ make launch     # Step 3: Launch new version
 - **Source of Truth**: Swift Package Manager project (`/Users/javenfang/Projects/TwentyGuard/`)
 - **Build Management**: All builds unified through Makefile
 - **Asset Management**: Resource files centrally managed in Sources/ directory
+- **Completion Default**: After finishing a requested code/app change, verifying it, and updating the local install when relevant, commit and push automatically unless the user explicitly says not to.
 
 ### Version Discipline
 - **Every user-visible app adjustment MUST bump the app version in the same change set.**
@@ -282,10 +283,10 @@ JSONL is the source of truth for event records; database is the query optimizati
 
 - ✅ **Bundle ID**: `com.javengroup.twentyguard`
 - ✅ **App Name**: "TwentyGuard"
-- ✅ **Version**: 1.6.0
+- ✅ **Version**: 1.7.2
 - ✅ **Minimum macOS**: 12.0
 - ⚠️ **Development Signing**: `make build-app` uses ad-hoc signing for local install/test only
-- ⚠️ **Public Direct Download**: latest verified public DMG is v1.5.3; v1.6.0 must run `make release` before upload
+- ⚠️ **Public Direct Download**: latest verified public DMG is v1.5.3; v1.7.2 must run `make release` before upload
 - ✅ **Size**: ~1.3MB (extremely lightweight)
 
 For direct distribution outside the Mac App Store, Apple requires the app to be

@@ -61,6 +61,31 @@ struct DailyStats {
     let avgPostponesPerSession: Double
 }
 
+struct StatsEventInput {
+    let type: StatsEventType
+    let timestamp: Date
+    let durationSeconds: Int?
+    let endTime: Date?
+    let nightKey: String?
+    let context: [String: String]
+
+    init(
+        type: StatsEventType,
+        timestamp: Date = Date(),
+        durationSeconds: Int? = nil,
+        endTime: Date? = nil,
+        nightKey: String? = nil,
+        context: [String: String] = [:]
+    ) {
+        self.type = type
+        self.timestamp = timestamp
+        self.durationSeconds = durationSeconds
+        self.endTime = endTime
+        self.nightKey = nightKey
+        self.context = context
+    }
+}
+
 // MARK: - Database Errors
 
 enum DatabaseError: Error {
@@ -78,21 +103,48 @@ class StatsDatabase {
     private var db: OpaquePointer?
     private let dbQueue = DispatchQueue(label: "com.javengroup.twentyguard.database", qos: .userInitiated)
     private let fileManager = FileManager.default
+    private let databaseURLOverride: URL?
     private var isValid = false
 
     private var databaseURL: URL {
+        if let databaseURLOverride {
+            try? fileManager.createDirectory(at: databaseURLOverride.deletingLastPathComponent(), withIntermediateDirectories: true)
+            return databaseURLOverride
+        }
+
         let paths = AppDataPaths.live(fileManager: fileManager)
         try? fileManager.createDirectory(at: paths.appSupportURL, withIntermediateDirectories: true)
         return paths.databaseURL
     }
 
-    private init() {
+    init(databaseURL: URL? = nil, registersForAppTermination: Bool = true) {
+        self.databaseURLOverride = databaseURL
         setupDatabase()
-        registerForAppTermination()
+        if registersForAppTermination {
+            registerForAppTermination()
+        }
     }
 
     deinit {
         closeDatabase()
+    }
+
+    func waitForIdleForTesting() {
+        dbQueue.sync {}
+    }
+
+    func closeForTesting() {
+        dbQueue.sync {
+            closeDatabase()
+        }
+    }
+
+    func sessionRecordsSinceForTesting(_ startDate: Date) throws -> [StatsSessionRecord] {
+        var result: Result<[StatsSessionRecord], Error>!
+        dbQueue.sync {
+            result = Result { try self.getSessionRecordsSince(startDate) }
+        }
+        return try result.get()
     }
 
     // MARK: - Database Setup
@@ -135,6 +187,18 @@ class StatsDatabase {
                 break_info TEXT,
                 break_completed INTEGER DEFAULT 0,
 
+                created_at REAL DEFAULT (strftime('%s', 'now'))
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS stats_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                duration_seconds INTEGER,
+                end_timestamp REAL,
+                night_key TEXT,
+                context TEXT,
                 created_at REAL DEFAULT (strftime('%s', 'now'))
             )
             """,
@@ -283,6 +347,26 @@ class StatsDatabase {
         }
     }
 
+    private func serializeContext(_ context: [String: String]) -> String {
+        guard !context.isEmpty else { return "{}" }
+        do {
+            let data = try JSONEncoder().encode(context)
+            return String(data: data, encoding: .utf8) ?? "{}"
+        } catch {
+            print("⚠️ Failed to serialize stats event context: \(error)")
+            return "{}"
+        }
+    }
+
+    private func parseContext(_ jsonString: String?) -> [String: String] {
+        guard let jsonString,
+              !jsonString.isEmpty,
+              let data = jsonString.data(using: .utf8) else {
+            return [:]
+        }
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    }
+
     private func closeDatabase() {
         if db != nil {
             sqlite3_close(db)
@@ -347,16 +431,33 @@ class StatsDatabase {
             )
         """
 
+        let createStatsEventsTable = """
+            CREATE TABLE IF NOT EXISTS stats_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                duration_seconds INTEGER,
+                end_timestamp REAL,
+                night_key TEXT,
+                context TEXT,
+                created_at REAL DEFAULT (strftime('%s', 'now'))
+            )
+        """
+
         // Create indices
         let indices = [
             "CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date(start_time, 'unixepoch'))",
             "CREATE INDEX IF NOT EXISTS idx_sessions_type ON sessions(type)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)",
-            "CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time)"
+            "CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time)",
+            "CREATE INDEX IF NOT EXISTS idx_stats_events_timestamp ON stats_events(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_stats_events_type ON stats_events(event_type)",
+            "CREATE INDEX IF NOT EXISTS idx_stats_events_night_key ON stats_events(night_key)"
         ]
 
         try dbQueue.sync {
             try executeSQL(createSessionsTable)
+            try executeSQL(createStatsEventsTable)
             try executeSQL(createDailySummaryTable)
 
             for index in indices {
@@ -616,9 +717,10 @@ class StatsDatabase {
 
             do {
                 try self.withTransaction {
-                    // Get active work session
-                    guard let sessionId = try self.getActiveWorkSessionIdInternal() else {
-                        print("⚠️ No active work session to postpone")
+                    // Postpone happens while the break overlay is active, after the
+                    // work session has already been completed and linked to break_info.
+                    guard let sessionId = try self.getPostponeTargetSessionIdInternal() else {
+                        print("⚠️ No work or break session to postpone")
                         return
                     }
 
@@ -776,6 +878,34 @@ class StatsDatabase {
         return sqlite3_column_int64(statement, 0)
     }
 
+    private func getPostponeTargetSessionIdInternal() throws -> Int64? {
+        let sql = """
+            SELECT id FROM sessions
+            WHERE type = 'work'
+              AND (
+                (break_info IS NOT NULL AND break_completed = 0)
+                OR status = 'active'
+              )
+            ORDER BY
+              CASE WHEN break_info IS NOT NULL AND break_completed = 0 THEN 0 ELSE 1 END,
+              start_time DESC
+            LIMIT 1
+        """
+
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare postpone target query")
+        }
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        return sqlite3_column_int64(statement, 0)
+    }
+
     private func getLatestWorkSessionForBreakInternal() throws -> Int64? {
         let sql = """
             SELECT id FROM sessions
@@ -798,6 +928,58 @@ class StatsDatabase {
         }
 
         return sqlite3_column_int64(statement, 0)
+    }
+
+    // MARK: - Long-Lived Stats Events
+
+    func recordStatsEvent(_ input: StatsEventInput) {
+        dbQueue.async { [weak self] in
+            guard let self = self, self.isValid else { return }
+
+            let sql = """
+                INSERT INTO stats_events (
+                    event_type,
+                    timestamp,
+                    duration_seconds,
+                    end_timestamp,
+                    night_key,
+                    context
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """
+
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+
+            guard sqlite3_prepare_v2(self.db, sql, -1, &statement, nil) == SQLITE_OK else {
+                print("❌ Failed to prepare stats event insert")
+                return
+            }
+
+            sqlite3_bind_text(statement, 1, (input.type.rawValue as NSString).utf8String, -1, nil)
+            sqlite3_bind_double(statement, 2, input.timestamp.timeIntervalSince1970)
+            if let durationSeconds = input.durationSeconds {
+                sqlite3_bind_int(statement, 3, Int32(durationSeconds))
+            } else {
+                sqlite3_bind_null(statement, 3)
+            }
+            if let endTime = input.endTime {
+                sqlite3_bind_double(statement, 4, endTime.timeIntervalSince1970)
+            } else {
+                sqlite3_bind_null(statement, 4)
+            }
+            if let nightKey = input.nightKey {
+                sqlite3_bind_text(statement, 5, (nightKey as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 5)
+            }
+            let context = self.serializeContext(input.context)
+            sqlite3_bind_text(statement, 6, (context as NSString).utf8String, -1, nil)
+
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("❌ Failed to insert stats event: \(input.type.rawValue)")
+            }
+        }
     }
 
     // MARK: - Async Query Methods
@@ -1118,10 +1300,14 @@ class StatsDatabase {
             do {
                 let calendar = Calendar.current
                 let todayStart = calendar.startOfDay(for: now)
-                let startDate = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
+                let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
+                let monthComponents = calendar.dateComponents([.year, .month], from: now)
+                let monthStart = calendar.date(from: monthComponents) ?? todayStart
+                let startDate = min(weekStart, monthStart)
                 let records = try self.getSessionRecordsSince(startDate)
+                let events = try self.getStatsEventRecordsSince(startDate)
                 let engine = StatsEngine(calendar: calendar, now: now)
-                completion(.success(engine.dashboard(from: records)))
+                completion(.success(engine.dashboard(from: records, events: events)))
             } catch {
                 completion(.failure(error))
             }
@@ -1143,6 +1329,27 @@ class StatsDatabase {
 
         semaphore.wait()
         return result
+    }
+
+    func getMonthSnapshot(monthContaining: Date, now: Date = Date(), completion: @escaping (Result<StatsMonthSnapshot, Error>) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, self.isValid else {
+                completion(.failure(DatabaseError.invalidState))
+                return
+            }
+
+            do {
+                let calendar = Calendar.current
+                let components = calendar.dateComponents([.year, .month], from: monthContaining)
+                let monthStart = calendar.date(from: components) ?? calendar.startOfDay(for: monthContaining)
+                let records = try self.getSessionRecordsSince(monthStart)
+                let events = try self.getStatsEventRecordsSince(monthStart)
+                let engine = StatsEngine(calendar: calendar, now: now)
+                completion(.success(engine.monthSnapshot(for: monthContaining, from: records, events: events)))
+            } catch {
+                completion(.failure(error))
+            }
+        }
     }
 
     private func getSessionRecordsSince(_ startDate: Date) throws -> [StatsSessionRecord] {
@@ -1223,6 +1430,54 @@ class StatsDatabase {
         return records
     }
 
+    private func getStatsEventRecordsSince(_ startDate: Date) throws -> [StatsEventRecord] {
+        let sql = """
+            SELECT id,
+                   event_type,
+                   timestamp,
+                   duration_seconds,
+                   end_timestamp,
+                   night_key,
+                   context
+            FROM stats_events
+            WHERE timestamp >= ?
+            ORDER BY timestamp ASC
+        """
+
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare stats event query")
+        }
+
+        sqlite3_bind_double(statement, 1, startDate.timeIntervalSince1970)
+
+        var records: [StatsEventRecord] = []
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = sqlite3_column_int64(statement, 0)
+            let eventTypeString = optionalString(statement, column: 1) ?? "unknown"
+            let timestamp = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
+            let durationSeconds = optionalInt(statement, column: 3)
+            let endTime = optionalDate(statement, column: 4)
+            let nightKey = optionalString(statement, column: 5)
+            let context = parseContext(optionalString(statement, column: 6))
+
+            records.append(StatsEventRecord(
+                id: id,
+                type: StatsEventType(rawValue: eventTypeString) ?? .unknown,
+                timestamp: timestamp,
+                durationSeconds: durationSeconds,
+                endTime: endTime,
+                nightKey: nightKey,
+                context: context
+            ))
+        }
+
+        return records
+    }
+
     private func optionalString(_ statement: OpaquePointer?, column: Int32) -> String? {
         guard sqlite3_column_type(statement, column) != SQLITE_NULL,
               let text = sqlite3_column_text(statement, column) else {
@@ -1291,22 +1546,24 @@ class StatsDatabase {
         dbQueue.async { [weak self] in
             guard let self = self, self.isValid else { return }
 
-            let sql = "DELETE FROM sessions WHERE start_time < ?"
-
-            var statement: OpaquePointer?
-            defer { sqlite3_finalize(statement) }
-
-            guard sqlite3_prepare_v2(self.db, sql, -1, &statement, nil) == SQLITE_OK else {
-                return
-            }
-
             let cutoffTime = Date().timeIntervalSince1970 - Double(keepDays * 24 * 3600)
-            sqlite3_bind_double(statement, 1, cutoffTime)
 
-            if sqlite3_step(statement) == SQLITE_DONE {
-                let deleted = sqlite3_changes(self.db)
-                if deleted > 0 {
-                    print("🗑️ Cleaned up \(deleted) old session records")
+            for (table, column) in [("sessions", "start_time"), ("stats_events", "timestamp")] {
+                let sql = "DELETE FROM \(table) WHERE \(column) < ?"
+                var statement: OpaquePointer?
+                defer { sqlite3_finalize(statement) }
+
+                guard sqlite3_prepare_v2(self.db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    continue
+                }
+
+                sqlite3_bind_double(statement, 1, cutoffTime)
+
+                if sqlite3_step(statement) == SQLITE_DONE {
+                    let deleted = sqlite3_changes(self.db)
+                    if deleted > 0 {
+                        print("🗑️ Cleaned up \(deleted) old \(table) records")
+                    }
                 }
             }
         }

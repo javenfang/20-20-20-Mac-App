@@ -3,10 +3,14 @@ import TwentyGuardCore
 
 final class StatsDashboardWindow: NSWindow {
     private let statsDB = StatsDatabase.shared
-    private let logManager = LogManager.shared
     private let verdictEvaluator = StatsHealthVerdictEvaluator()
     private var localizer: ((String) -> String)?
+    private var dashboardSnapshot: StatsDashboardSnapshot?
+    private var monthSnapshot: StatsMonthSnapshot?
+    private var selectedMonthDay: Date?
+    private var activePage: StatsDashboardPage = .summary
     private let contentStack = NSStackView()
+    private weak var monthContentStack: NSStackView?
     private let scrollView = NSScrollView()
     private let documentView = FlippedDocumentView()
     private let footerView = NSView()
@@ -151,13 +155,38 @@ final class StatsDashboardWindow: NSWindow {
     }
 
     private func render(_ snapshot: StatsDashboardSnapshot) {
+        dashboardSnapshot = snapshot
+        monthSnapshot = snapshot.month
+        selectedMonthDay = defaultSelectedDay(in: snapshot.month)
+        renderDashboard()
+    }
+
+    private func renderDashboard() {
+        guard let snapshot = dashboardSnapshot, let monthSnapshot else { return }
         clearContent()
-        addContentSection(makeHeader(snapshot))
-        addContentSection(makeVerdictPanel(snapshot.today))
-        addContentSection(makeKeyMetrics(snapshot.today))
-        addContentSection(makeWeekTableSection(snapshot.week))
-        if snapshot.week.quality.hasIssues {
-            addContentSection(makeQualitySection(snapshot.week.quality))
+
+        let presentation = StatsDashboardPresentation(
+            page: activePage,
+            hasQualityIssues: snapshot.week.quality.hasIssues
+        )
+
+        for section in presentation.sections {
+            switch section {
+            case .header:
+                addContentSection(makeHeader(snapshot))
+            case .pageTabs:
+                addContentSection(makePageTabs())
+            case .verdict:
+                addContentSection(makeVerdictPanel(snapshot.today))
+            case .keyMetrics:
+                addContentSection(makeKeyMetrics(snapshot.today))
+            case .weekTable:
+                addContentSection(makeWeekTableSection(snapshot.week))
+            case .month:
+                addContentSection(makeMonthContentContainer(monthSnapshot))
+            case .quality:
+                addContentSection(makeQualitySection(snapshot.week.quality))
+            }
         }
         scrollToTop()
     }
@@ -176,6 +205,7 @@ final class StatsDashboardWindow: NSWindow {
     }
 
     private func clearContent() {
+        monthContentStack = nil
         for view in contentStack.arrangedSubviews {
             contentStack.removeArrangedSubview(view)
             view.removeFromSuperview()
@@ -185,6 +215,16 @@ final class StatsDashboardWindow: NSWindow {
     private func addContentSection(_ view: NSView) {
         contentStack.addArrangedSubview(view)
         view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    }
+
+    private func replaceStackContents(in stack: NSStackView, with view: NSView) {
+        for arrangedView in stack.arrangedSubviews {
+            stack.removeArrangedSubview(arrangedView)
+            arrangedView.removeFromSuperview()
+        }
+
+        stack.addArrangedSubview(view)
+        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     private func makeHeader(_ snapshot: StatsDashboardSnapshot?) -> NSView {
@@ -204,6 +244,31 @@ final class StatsDashboardWindow: NSWindow {
             subtitle = localized("statsLoadingSubtitle")
         }
         stack.addArrangedSubview(makeLabel(subtitle, size: 12, color: .secondaryLabelColor))
+
+        return container
+    }
+
+    private func makePageTabs() -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let control = NSSegmentedControl(
+            labels: [localized("statsSummaryTab"), localized("statsMonthTab")],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(changeStatsPage(_:))
+        )
+        control.translatesAutoresizingMaskIntoConstraints = false
+        control.segmentStyle = .rounded
+        control.selectedSegment = activePage.rawValue
+        control.setContentHuggingPriority(.required, for: .horizontal)
+
+        container.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.topAnchor.constraint(equalTo: container.topAnchor),
+            control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            control.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
 
         return container
     }
@@ -248,22 +313,27 @@ final class StatsDashboardWindow: NSWindow {
 
         let row = makeHorizontalStack(distribution: .fillEqually)
         row.addArrangedSubview(makeMetricCard(
-            title: localized("statsCompletionRate"),
+            title: localized("statsBreakDisciplineMetric"),
             value: formatPercent(today.breakCompletionRate),
-            detail: localizedFormat("statsCompletionDetailFormat", today.completedBreaks, today.breakOpportunities),
+            detail: localizedFormat(
+                "statsBreakDisciplineDetailFormat",
+                today.completedBreaks,
+                today.breakOpportunities,
+                formatDuration(today.longestWorkSeconds)
+            ),
             accent: completionColor(today.breakCompletionRate)
         ))
         row.addArrangedSubview(makeMetricCard(
-            title: localized("statsPostponeMetric"),
-            value: localizedFormat("statsPostponeCountFormat", today.totalPostpones),
-            detail: localizedFormat("statsPostponedSessionsFormat", today.postponedSessions),
-            accent: today.postponeSessionRate > 0.3 ? .systemOrange : .systemGreen
+            title: localized("statsExceptionMetric"),
+            value: localizedFormat("statsPostponeCountFormat", today.exceptionCount),
+            detail: exceptionDetail(today),
+            accent: today.exceptionCount > 0 ? .systemOrange : .systemGreen
         ))
         let isNightRestrictionEnabled = nightRestrictionEnabled()
         row.addArrangedSubview(makeMetricCard(
-            title: localized("statsNightMetric"),
+            title: localized("statsNightBoundaryMetric"),
             value: isNightRestrictionEnabled ? localized("statsEnabled") : localized("statsDisabled"),
-            detail: nightOverrideDetail(isEnabled: isNightRestrictionEnabled),
+            detail: nightBoundaryDetail(today, isEnabled: isNightRestrictionEnabled),
             accent: isNightRestrictionEnabled ? .systemGreen : .secondaryLabelColor,
             monospacedValue: false
         ))
@@ -342,11 +412,11 @@ final class StatsDashboardWindow: NSWindow {
 
         let dateLabel = makeLabel(formatShortDate(day.date), size: 12, weight: .medium)
         dateLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        dateLabel.widthAnchor.constraint(equalToConstant: 68).isActive = true
+        dateLabel.widthAnchor.constraint(equalToConstant: 62).isActive = true
 
         let workLabel = makeLabel(formatDuration(day.totalWorkSeconds), size: 12, color: .secondaryLabelColor)
         workLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        workLabel.widthAnchor.constraint(equalToConstant: 178).isActive = true
+        workLabel.widthAnchor.constraint(equalToConstant: 132).isActive = true
 
         let completionLabel = makeBadge(formatPercent(day.breakCompletionRate), color: completionColor(day.breakCompletionRate))
         completionLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
@@ -356,12 +426,18 @@ final class StatsDashboardWindow: NSWindow {
         let postponeLabel = makeLabel("\(day.totalPostpones)", size: 12, weight: .semibold, color: day.totalPostpones > 0 ? .systemOrange : .secondaryLabelColor)
         postponeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         postponeLabel.alignment = .right
-        postponeLabel.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        postponeLabel.widthAnchor.constraint(equalToConstant: 50).isActive = true
+
+        let exceptionLabel = makeLabel(exceptionMarker(day), size: 12, weight: .semibold, color: day.exceptionCount > 0 ? .systemOrange : .secondaryLabelColor)
+        exceptionLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        exceptionLabel.alignment = .right
+        exceptionLabel.widthAnchor.constraint(equalToConstant: 56).isActive = true
 
         row.addArrangedSubview(dateLabel)
         row.addArrangedSubview(workLabel)
         row.addArrangedSubview(completionLabel)
         row.addArrangedSubview(postponeLabel)
+        row.addArrangedSubview(exceptionLabel)
         return row
     }
 
@@ -369,16 +445,165 @@ final class StatsDashboardWindow: NSWindow {
         let row = makeHorizontalStack(spacing: 14)
         row.alignment = .centerY
 
-        let dateLabel = makeColumnHeader(localized("statsDateColumn"), width: 68, alignment: .left)
-        let workLabel = makeColumnHeader(localized("statsWorkColumn"), width: 178, alignment: .left)
+        let dateLabel = makeColumnHeader(localized("statsDateColumn"), width: 62, alignment: .left)
+        let workLabel = makeColumnHeader(localized("statsWorkColumn"), width: 132, alignment: .left)
         let completionLabel = makeColumnHeader(localized("statsCompletionColumn"), width: 74, alignment: .right)
-        let postponeLabel = makeColumnHeader(localized("statsPostponeColumn"), width: 56, alignment: .right)
+        let postponeLabel = makeColumnHeader(localized("statsPostponeColumn"), width: 50, alignment: .right)
+        let exceptionLabel = makeColumnHeader(localized("statsExceptionColumn"), width: 56, alignment: .right)
 
         row.addArrangedSubview(dateLabel)
         row.addArrangedSubview(workLabel)
         row.addArrangedSubview(completionLabel)
         row.addArrangedSubview(postponeLabel)
+        row.addArrangedSubview(exceptionLabel)
         return row
+    }
+
+    private func makeMonthSection(_ month: StatsMonthSnapshot) -> NSView {
+        let panel = makePanel()
+        let stack = makeVerticalStack(spacing: 14, inset: 16)
+        panel.addSubview(stack)
+        pin(stack, to: panel)
+
+        let header = makeHorizontalStack(spacing: 10)
+        header.alignment = .centerY
+
+        let previous = NSButton(title: "<", target: self, action: #selector(showPreviousMonth))
+        previous.translatesAutoresizingMaskIntoConstraints = false
+        previous.bezelStyle = .rounded
+        previous.widthAnchor.constraint(equalToConstant: 34).isActive = true
+
+        let title = makeLabel(formatMonth(month.monthStart), size: 16, weight: .semibold)
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let next = NSButton(title: ">", target: self, action: #selector(showNextMonth))
+        next.translatesAutoresizingMaskIntoConstraints = false
+        next.bezelStyle = .rounded
+        next.isEnabled = month.monthStart < currentMonthStart()
+        next.widthAnchor.constraint(equalToConstant: 34).isActive = true
+
+        header.addArrangedSubview(previous)
+        header.addArrangedSubview(title)
+        header.addArrangedSubview(next)
+        stack.addArrangedSubview(header)
+
+        stack.addArrangedSubview(makeLabel(
+            localizedFormat(
+                "statsMonthSummaryFormat",
+                month.activeDays,
+                month.healthyDays,
+                formatPercent(month.breakCompletionRate),
+                month.exceptionDays
+            ),
+            size: 12,
+            color: .secondaryLabelColor
+        ))
+
+        stack.addArrangedSubview(makeMonthCalendar(month))
+        stack.addArrangedSubview(makeSelectedDayDetail(month))
+        return panel
+    }
+
+    private func makeMonthContentContainer(_ month: StatsMonthSnapshot) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = makeVerticalStack(spacing: 0, inset: 0)
+        monthContentStack = stack
+        container.addSubview(stack)
+        pin(stack, to: container)
+        refreshMonthContent(with: month)
+
+        return container
+    }
+
+    private func refreshMonthContent(with month: StatsMonthSnapshot? = nil) {
+        guard let stack = monthContentStack, let month = month ?? monthSnapshot else { return }
+        replaceStackContents(in: stack, with: makeMonthSection(month))
+    }
+
+    private func makeMonthCalendar(_ month: StatsMonthSnapshot) -> NSView {
+        let stack = makeVerticalStack(spacing: 6, inset: 0)
+        let weekdayRow = makeHorizontalStack(spacing: 6, distribution: .fillEqually)
+        for symbol in shortWeekdaySymbols() {
+            let label = makeLabel(symbol, size: 11, weight: .medium, color: .secondaryLabelColor)
+            label.alignment = .center
+            weekdayRow.addArrangedSubview(label)
+        }
+        stack.addArrangedSubview(weekdayRow)
+        weekdayRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        let calendar = Calendar.current
+        let leadingBlanks = max(0, calendar.component(.weekday, from: month.monthStart) - calendar.firstWeekday)
+        var cells: [StatsDaySnapshot?] = Array(repeating: nil, count: leadingBlanks)
+        cells.append(contentsOf: month.days.map(Optional.some))
+        while cells.count % 7 != 0 {
+            cells.append(nil)
+        }
+
+        for rowStart in stride(from: 0, to: cells.count, by: 7) {
+            let row = makeHorizontalStack(spacing: 6, distribution: .fillEqually)
+            for index in rowStart..<(rowStart + 7) {
+                row.addArrangedSubview(makeMonthCell(day: cells[index], index: index - leadingBlanks))
+            }
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        return stack
+    }
+
+    private func makeMonthCell(day: StatsDaySnapshot?, index: Int) -> NSView {
+        guard let day else {
+            let spacer = NSView()
+            spacer.translatesAutoresizingMaskIntoConstraints = false
+            spacer.heightAnchor.constraint(equalToConstant: 42).isActive = true
+            return spacer
+        }
+
+        let button = NSButton(title: monthCellTitle(day), target: self, action: #selector(selectMonthDay(_:)))
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
+        button.tag = index
+        button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
+        button.layer?.backgroundColor = monthCellColor(day).cgColor
+        button.contentTintColor = .labelColor
+        button.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        return button
+    }
+
+    private func makeSelectedDayDetail(_ month: StatsMonthSnapshot) -> NSView {
+        let day = selectedDay(in: month)
+        let panel = NSView()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        let stack = makeVerticalStack(spacing: 6, inset: 0)
+        panel.addSubview(stack)
+        pin(stack, to: panel)
+
+        guard let day else {
+            stack.addArrangedSubview(makeLabel(localized("statsMonthNoSelectedDay"), size: 12, color: .secondaryLabelColor))
+            return panel
+        }
+
+        stack.addArrangedSubview(makeLabel(formatLongDate(day.date), size: 13, weight: .semibold))
+        stack.addArrangedSubview(makeLabel(
+            localizedFormat(
+                "statsSelectedDayDetailFormat",
+                formatDuration(day.totalWorkSeconds),
+                formatPercent(day.breakCompletionRate),
+                day.totalPostpones,
+                day.exceptionCount
+            ),
+            size: 12,
+            color: .secondaryLabelColor
+        ))
+        if day.exceptionCount > 0 {
+            stack.addArrangedSubview(makeLabel(exceptionDetail(day), size: 12, color: .systemOrange))
+        }
+        return panel
     }
 
     private func makeColumnHeader(_ text: String, width: CGFloat, alignment: NSTextAlignment) -> NSTextField {
@@ -522,6 +747,25 @@ final class StatsDashboardWindow: NSWindow {
         return formatter.string(from: date)
     }
 
+    private func formatLongDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func formatMonth(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        return formatter.string(from: date)
+    }
+
+    private func shortWeekdaySymbols() -> [String] {
+        let formatter = DateFormatter()
+        let symbols = formatter.shortWeekdaySymbols ?? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        let first = max(0, Calendar.current.firstWeekday - 1)
+        return Array(symbols[first...] + symbols[..<first])
+    }
+
     private func postponeBreakdown(_ values: [Int: Int]) -> String {
         let one = values[1] ?? 0
         let two = values[2] ?? 0
@@ -540,6 +784,78 @@ final class StatsDashboardWindow: NSWindow {
         return localized("statsNormalRhythm")
     }
 
+    private func exceptionMarker(_ day: StatsDaySnapshot) -> String {
+        guard day.exceptionCount > 0 else { return localized("statsExceptionNone") }
+        return localizedFormat("statsExceptionCountFormat", day.exceptionCount)
+    }
+
+    private func exceptionDetail(_ day: StatsDaySnapshot) -> String {
+        localizedFormat(
+            "statsExceptionDetailFormat",
+            day.appExitCount,
+            formatDuration(day.appOffSeconds),
+            day.temporaryDisableCount,
+            formatDuration(day.temporaryDisableSeconds),
+            day.nightOverrideCount,
+            formatDuration(day.nightOverrideSeconds)
+        )
+    }
+
+    private func nightBoundaryDetail(_ today: StatsDaySnapshot, isEnabled: Bool) -> String {
+        guard isEnabled else { return localized("statsNightDetail") }
+        guard today.nightOverrideCount > 0 else { return localized("statsNightNoOverride") }
+        return localizedFormat("statsNightOverrideFormat", today.nightOverrideCount, max(1, today.nightOverrideSeconds / 60))
+    }
+
+    private func monthCellTitle(_ day: StatsDaySnapshot) -> String {
+        let dayNumber = Calendar.current.component(.day, from: day.date)
+        if day.exceptionCount > 0 { return "\(dayNumber) !" }
+        if day.isHealthyDay { return "\(dayNumber) ." }
+        if day.workSessions > 0 || day.breakOpportunities > 0 { return "\(dayNumber)" }
+        return "\(dayNumber)"
+    }
+
+    private func monthCellColor(_ day: StatsDaySnapshot) -> NSColor {
+        if isSelected(day.date) {
+            return NSColor.controlAccentColor.withAlphaComponent(0.38)
+        }
+        if day.exceptionCount > 0 {
+            return NSColor.systemOrange.withAlphaComponent(0.22)
+        }
+        if day.isHealthyDay {
+            return NSColor.systemGreen.withAlphaComponent(0.20)
+        }
+        if day.workSessions > 0 || day.breakOpportunities > 0 {
+            return NSColor.systemYellow.withAlphaComponent(0.22)
+        }
+        return NSColor.separatorColor.withAlphaComponent(0.20)
+    }
+
+    private func defaultSelectedDay(in month: StatsMonthSnapshot) -> Date? {
+        let calendar = Calendar.current
+        if let today = month.days.first(where: { calendar.isDate($0.date, inSameDayAs: Date()) }) {
+            return today.date
+        }
+        return month.days.last(where: { $0.workSessions > 0 || $0.exceptionCount > 0 })?.date ?? month.days.first?.date
+    }
+
+    private func selectedDay(in month: StatsMonthSnapshot) -> StatsDaySnapshot? {
+        let calendar = Calendar.current
+        guard let selectedMonthDay else { return nil }
+        return month.days.first { calendar.isDate($0.date, inSameDayAs: selectedMonthDay) }
+    }
+
+    private func currentMonthStart() -> Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month], from: Date())
+        return calendar.date(from: components) ?? calendar.startOfDay(for: Date())
+    }
+
+    private func isSelected(_ date: Date) -> Bool {
+        guard let selectedMonthDay else { return false }
+        return Calendar.current.isDate(date, inSameDayAs: selectedMonthDay)
+    }
+
     private func verdictColor(_ severity: StatsHealthVerdictSeverity) -> NSColor {
         switch severity {
         case .good:
@@ -553,73 +869,6 @@ final class StatsDashboardWindow: NSWindow {
 
     private func nightRestrictionEnabled() -> Bool {
         UserDefaults.standard.bool(forKey: "nightRestrictionEnabled")
-    }
-
-    private func nightOverrideDetail(isEnabled: Bool) -> String {
-        guard isEnabled else { return localized("statsNightDetail") }
-
-        let summary = logManager.nightOverrideSummary(nightKey: currentStatsNightKey())
-        if summary.count == 0 {
-            return localized("statsNightNoOverride")
-        }
-        return localizedFormat("statsNightOverrideFormat", summary.count, summary.totalMinutes)
-    }
-
-    private func currentStatsNightKey(now: Date = Date()) -> String {
-        let calendar = Calendar.current
-        let settings = NightRestrictionSettings(
-            isEnabled: true,
-            windDownStart: loadClockTime(forKey: "nightWindDownStartMinutes", defaultValue: ClockTime(hour: 20, minute: 0)),
-            lockStart: loadClockTime(forKey: "nightLockStartMinutes", defaultValue: ClockTime(hour: 21, minute: 0)),
-            unlockTime: loadClockTime(forKey: "nightUnlockMinutes", defaultValue: ClockTime(hour: 7, minute: 0))
-        )
-        let today = calendar.startOfDay(for: now)
-        let windDownToday = date(on: today, at: settings.windDownStart, calendar: calendar)
-        let anchorDay: Date
-        if now >= windDownToday {
-            anchorDay = today
-        } else {
-            anchorDay = calendar.date(byAdding: .day, value: -1, to: today) ?? today
-        }
-
-        let schedule = nightSchedule(anchorDay: anchorDay, settings: settings, calendar: calendar)
-        return NightOverridePolicy(calendar: calendar).nightKey(for: schedule)
-    }
-
-    private func loadClockTime(forKey key: String, defaultValue: ClockTime) -> ClockTime {
-        guard UserDefaults.standard.object(forKey: key) != nil else { return defaultValue }
-        let minutes = min(23 * 60 + 59, max(0, UserDefaults.standard.integer(forKey: key)))
-        return ClockTime(minutesAfterMidnight: minutes)
-    }
-
-    private func nightSchedule(anchorDay: Date, settings: NightRestrictionSettings, calendar: Calendar) -> NightRestrictionSchedule {
-        let windDownStart = date(on: anchorDay, at: settings.windDownStart, calendar: calendar)
-        var lockStart = date(on: anchorDay, at: settings.lockStart, calendar: calendar)
-        var unlockTime = date(on: anchorDay, at: settings.unlockTime, calendar: calendar)
-
-        while lockStart <= windDownStart {
-            lockStart = calendar.date(byAdding: .day, value: 1, to: lockStart) ?? lockStart.addingTimeInterval(24 * 60 * 60)
-        }
-        while unlockTime <= lockStart {
-            unlockTime = calendar.date(byAdding: .day, value: 1, to: unlockTime) ?? unlockTime.addingTimeInterval(24 * 60 * 60)
-        }
-
-        return NightRestrictionSchedule(
-            windDownStart: windDownStart,
-            lockStart: lockStart,
-            unlockTime: unlockTime,
-            windDownStartTime: settings.windDownStart,
-            lockStartTime: settings.lockStart,
-            unlockClockTime: settings.unlockTime
-        )
-    }
-
-    private func date(on day: Date, at time: ClockTime, calendar: Calendar) -> Date {
-        var components = calendar.dateComponents([.year, .month, .day], from: day)
-        components.hour = time.hour
-        components.minute = time.minute
-        components.second = 0
-        return calendar.date(from: components) ?? day
     }
 
     private func completionColor(_ rate: Double) -> NSColor {
@@ -660,6 +909,52 @@ final class StatsDashboardWindow: NSWindow {
 
     @objc private func closeWindow() {
         close()
+    }
+
+    @objc private func changeStatsPage(_ sender: NSSegmentedControl) {
+        guard let page = StatsDashboardPage(rawValue: sender.selectedSegment), page != activePage else {
+            return
+        }
+
+        activePage = page
+        renderDashboard()
+    }
+
+    @objc private func showPreviousMonth() {
+        guard let monthSnapshot else { return }
+        loadMonth(monthSnapshot.previousMonthStart)
+    }
+
+    @objc private func showNextMonth() {
+        guard let monthSnapshot else { return }
+        loadMonth(monthSnapshot.nextMonthStart)
+    }
+
+    @objc private func selectMonthDay(_ sender: NSButton) {
+        guard let monthSnapshot, monthSnapshot.days.indices.contains(sender.tag) else { return }
+        selectedMonthDay = monthSnapshot.days[sender.tag].date
+        if StatsDashboardPresentation.renderScope(for: .monthDaySelected) == .monthContent {
+            refreshMonthContent()
+        } else {
+            renderDashboard()
+        }
+    }
+
+    private func loadMonth(_ date: Date) {
+        statsDB.getMonthSnapshot(monthContaining: date) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case .success(let snapshot) = result {
+                    self.monthSnapshot = snapshot
+                    self.selectedMonthDay = self.defaultSelectedDay(in: snapshot)
+                    if StatsDashboardPresentation.renderScope(for: .monthChanged) == .monthContent {
+                        self.refreshMonthContent(with: snapshot)
+                    } else {
+                        self.renderDashboard()
+                    }
+                }
+            }
+        }
     }
 
     override var canBecomeKey: Bool {

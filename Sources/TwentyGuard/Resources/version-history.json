@@ -7,8 +7,37 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.6.0",
+  "current_version": "1.7.2",
   "versions": [
+    {
+      "version": "1.7.2",
+      "date": "2026-05-23",
+      "changes": [
+        "Fixed postpone statistics staying at zero after breaks were postponed from the break overlay",
+        "Attached postpone records to the active break's work session instead of requiring an active work session",
+        "Added an app-level SQLite regression test for postpone persistence during active breaks"
+      ]
+    },
+    {
+      "version": "1.7.1",
+      "date": "2026-05-23",
+      "changes": [
+        "Moved monthly statistics into a separate top-level tab instead of appending them to the default summary page",
+        "Kept month navigation and day selection scoped to the month tab so the summary page is not rebuilt during month browsing",
+        "Added Core presentation tests and localization coverage for the statistics tabs"
+      ]
+    },
+    {
+      "version": "1.7.0",
+      "date": "2026-05-23",
+      "changes": [
+        "Redesigned the statistics dashboard around protection adherence instead of raw activity tracking",
+        "Added long-lived SQLite stats events for app exits, temporary disable, and night override activity",
+        "Added monthly statistics with month switching, calendar-style daily states, and selected-day details",
+        "Expanded the seven-day view with compact exception markers",
+        "Added Core aggregation tests and localization coverage for protection statistics"
+      ]
+    },
     {
       "version": "1.6.0",
       "date": "2026-05-23",

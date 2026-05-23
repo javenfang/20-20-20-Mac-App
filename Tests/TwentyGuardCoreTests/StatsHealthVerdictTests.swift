@@ -32,6 +32,22 @@ final class StatsHealthVerdictTests: XCTestCase {
         XCTAssertEqual(verdict.severity, .warning)
     }
 
+    func testProtectionBypassTakesPriorityAfterLongWorkAndBreakProblems() {
+        let day = makeDay(
+            longestWorkSeconds: 30 * 60,
+            breakCompletionRate: 0.9,
+            postponeSessionRate: 0.1,
+            appExitCount: 1,
+            temporaryDisableCount: 1
+        )
+
+        let verdict = StatsHealthVerdictEvaluator().verdict(for: day, localize: zhHans)
+
+        XCTAssertEqual(verdict.title, "保护被绕过")
+        XCTAssertEqual(verdict.reason, "今天有 2 次例外或中断，统计会把它们单独标出")
+        XCTAssertEqual(verdict.severity, .warning)
+    }
+
     func testHealthyDayIsNormalRhythm() {
         let day = makeDay(longestWorkSeconds: 35 * 60, breakCompletionRate: 0.9, postponeSessionRate: 0.1)
 
@@ -59,7 +75,10 @@ final class StatsHealthVerdictTests: XCTestCase {
         longestWorkSeconds: Int,
         postponedSessions: Int? = nil,
         breakCompletionRate: Double? = nil,
-        postponeSessionRate: Double? = nil
+        postponeSessionRate: Double? = nil,
+        appExitCount: Int = 0,
+        temporaryDisableCount: Int = 0,
+        nightOverrideCount: Int = 0
     ) -> StatsDaySnapshot {
         let completedBreaks = completedBreaks ?? Int(((breakCompletionRate ?? 1.0) * Double(max(1, breakOpportunities))).rounded())
         let postponedSessions = postponedSessions ?? Int(((postponeSessionRate ?? 0.0) * Double(max(1, breakOpportunities))).rounded())
@@ -74,6 +93,12 @@ final class StatsHealthVerdictTests: XCTestCase {
             postponesByMinutes: [:],
             totalWorkSeconds: workSessions * 30 * 60,
             longestWorkSeconds: longestWorkSeconds,
+            appExitCount: appExitCount,
+            appOffSeconds: appExitCount * 10 * 60,
+            temporaryDisableCount: temporaryDisableCount,
+            temporaryDisableSeconds: temporaryDisableCount * 60 * 60,
+            nightOverrideCount: nightOverrideCount,
+            nightOverrideSeconds: nightOverrideCount * 30 * 60,
             quality: StatsQualitySummary()
         )
     }

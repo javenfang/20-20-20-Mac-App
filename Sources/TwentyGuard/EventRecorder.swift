@@ -125,6 +125,8 @@ class EventRecorder {
     // MARK: - App Lifecycle
 
     func recordAppLaunch() {
+        statsDB.recordStatsEvent(StatsEventInput(type: .appLaunched))
+
         // Log app launch
         logManager.logEvent(.appLaunched)
 
@@ -137,6 +139,7 @@ class EventRecorder {
     func recordAppTermination() {
         // End any active sessions
         statsDB.endActiveSession()
+        statsDB.recordStatsEvent(StatsEventInput(type: .appTerminated))
 
         // Log termination
         logManager.logEvent(.appTerminated)
@@ -170,10 +173,13 @@ class EventRecorder {
     // MARK: - Night Override
 
     func recordNightOverrideRequested(nightKey: String, request: NightOverrideRequest) {
-        logManager.logEvent(.nightOverrideRequested, context: nightOverrideContext(
+        let context = nightOverrideContext(nightKey: nightKey, request: request)
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .nightOverrideRequested,
             nightKey: nightKey,
-            request: request
+            context: context
         ))
+        logManager.logEvent(.nightOverrideRequested, context: context)
     }
 
     func recordNightOverrideGranted(state: NightOverrideState, request: NightOverrideRequest) {
@@ -181,6 +187,14 @@ class EventRecorder {
         context["reason"] = state.reason.rawValue
         context["granted_at"] = formattedLogDate(state.grantedAt)
         context["override_until"] = formattedLogDate(state.until)
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .nightOverrideGranted,
+            timestamp: state.grantedAt,
+            durationSeconds: request.unlockSeconds,
+            endTime: state.until,
+            nightKey: state.nightKey,
+            context: context
+        ))
         logManager.logEvent(
             .nightOverrideGranted,
             duration: TimeInterval(request.unlockSeconds),
@@ -189,10 +203,13 @@ class EventRecorder {
     }
 
     func recordNightOverrideCancelled(nightKey: String, request: NightOverrideRequest) {
-        logManager.logEvent(.nightOverrideCancelled, context: nightOverrideContext(
+        let context = nightOverrideContext(nightKey: nightKey, request: request)
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .nightOverrideCancelled,
             nightKey: nightKey,
-            request: request
+            context: context
         ))
+        logManager.logEvent(.nightOverrideCancelled, context: context)
     }
 
     func recordNightOverrideExpired(state: NightOverrideState) {
@@ -206,6 +223,12 @@ class EventRecorder {
         context["reason"] = state.reason.rawValue
         context["granted_at"] = formattedLogDate(state.grantedAt)
         context["override_until"] = formattedLogDate(state.until)
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .nightOverrideExpired,
+            timestamp: Date(),
+            nightKey: state.nightKey,
+            context: context
+        ))
         logManager.logEvent(.nightOverrideExpired, context: context)
     }
 
@@ -215,6 +238,13 @@ class EventRecorder {
         statsDB.endActiveSession()
         var context = temporaryDisableContext(state: state)
         context["reason"] = reason
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .temporaryDisableStarted,
+            timestamp: state.startedAt,
+            durationSeconds: TemporaryDisablePolicy.disableSeconds,
+            endTime: state.until,
+            context: context
+        ))
         logManager.logEvent(
             .temporaryDisableStarted,
             duration: TimeInterval(TemporaryDisablePolicy.disableSeconds),
@@ -225,11 +255,20 @@ class EventRecorder {
     func recordTemporaryDisableEnded(state: TemporaryDisableState, reason: String) {
         var context = temporaryDisableContext(state: state)
         context["reason"] = reason
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .temporaryDisableEnded,
+            context: context
+        ))
         logManager.logEvent(.temporaryDisableEnded, context: context)
     }
 
     func recordTemporaryDisableExpired(state: TemporaryDisableState) {
-        logManager.logEvent(.temporaryDisableExpired, context: temporaryDisableContext(state: state))
+        let context = temporaryDisableContext(state: state)
+        statsDB.recordStatsEvent(StatsEventInput(
+            type: .temporaryDisableExpired,
+            context: context
+        ))
+        logManager.logEvent(.temporaryDisableExpired, context: context)
     }
 
     private func nightOverrideContext(nightKey: String, request: NightOverrideRequest) -> [String: String] {

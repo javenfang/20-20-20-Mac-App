@@ -36,5 +36,9 @@ let package = Package(
             name: "TwentyGuardCoreTests",
             dependencies: ["TwentyGuardCore"]
         ),
+        .testTarget(
+            name: "TwentyGuardAppTests",
+            dependencies: ["TwentyGuard"]
+        ),
     ]
 )

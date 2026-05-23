@@ -39,6 +39,24 @@ final class StatsEngineTests: XCTestCase {
         )
     }
 
+    private func event(
+        _ type: StatsEventType,
+        at timestamp: String,
+        duration: Int? = nil,
+        end: String? = nil,
+        nightKey: String? = nil
+    ) -> StatsEventRecord {
+        StatsEventRecord(
+            id: Int64(timestamp.hashValue),
+            type: type,
+            timestamp: date(timestamp),
+            durationSeconds: duration,
+            endTime: end.map(date),
+            nightKey: nightKey,
+            context: [:]
+        )
+    }
+
     func testIgnoresShortRestartFragments() {
         let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T12:00:00Z"))
         let snapshot = engine.dashboard(from: [
@@ -118,5 +136,97 @@ final class StatsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.today.completedBreaks, 1)
         XCTAssertEqual(snapshot.today.breakCompletionRate, 0.5)
         XCTAssertEqual(snapshot.today.quality.activeBreakRecords, 1)
+    }
+
+    func testAggregatesAppExitProtectionInterruptionsForActiveDays() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T18:00:00Z"))
+
+        let snapshot = engine.dashboard(
+            from: [
+                session(id: 1, start: "2026-04-26T09:00:00Z", duration: 20 * 60)
+            ],
+            events: [
+                event(.appTerminated, at: "2026-04-26T10:00:00Z"),
+                event(.appLaunched, at: "2026-04-26T10:12:00Z")
+            ]
+        )
+
+        XCTAssertEqual(snapshot.today.appExitCount, 1)
+        XCTAssertEqual(snapshot.today.appOffSeconds, 12 * 60)
+        XCTAssertEqual(snapshot.today.exceptionCount, 1)
+        XCTAssertFalse(snapshot.today.isHealthyDay)
+    }
+
+    func testDoesNotInventAppOffDurationForUnpairedTermination() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T18:00:00Z"))
+
+        let snapshot = engine.dashboard(
+            from: [
+                session(id: 1, start: "2026-04-26T09:00:00Z", duration: 20 * 60)
+            ],
+            events: [
+                event(.appTerminated, at: "2026-04-26T10:00:00Z")
+            ]
+        )
+
+        XCTAssertEqual(snapshot.today.appExitCount, 1)
+        XCTAssertEqual(snapshot.today.appOffSeconds, 0)
+    }
+
+    func testAggregatesTemporaryDisableDurations() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T18:00:00Z"))
+
+        let snapshot = engine.dashboard(
+            from: [
+                session(id: 1, start: "2026-04-26T09:00:00Z", duration: 20 * 60)
+            ],
+            events: [
+                event(.temporaryDisableStarted, at: "2026-04-26T14:00:00Z", duration: 60 * 60)
+            ]
+        )
+
+        XCTAssertEqual(snapshot.today.temporaryDisableCount, 1)
+        XCTAssertEqual(snapshot.today.temporaryDisableSeconds, 60 * 60)
+        XCTAssertEqual(snapshot.today.exceptionCount, 1)
+    }
+
+    func testAggregatesNightOverridesByNightKey() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T18:00:00Z"))
+
+        let snapshot = engine.dashboard(
+            from: [
+                session(id: 1, start: "2026-04-26T09:00:00Z", duration: 20 * 60)
+            ],
+            events: [
+                event(.nightOverrideGranted, at: "2026-04-27T01:00:00Z", duration: 30 * 60, nightKey: "2026-04-26")
+            ]
+        )
+
+        XCTAssertEqual(snapshot.today.nightOverrideCount, 1)
+        XCTAssertEqual(snapshot.today.nightOverrideSeconds, 30 * 60)
+        XCTAssertEqual(snapshot.today.exceptionCount, 1)
+    }
+
+    func testMonthSnapshotAggregatesDaysAndExceptions() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T18:00:00Z"))
+
+        let snapshot = engine.monthSnapshot(
+            for: date("2026-04-15T12:00:00Z"),
+            from: [
+                session(id: 1, start: "2026-04-01T09:00:00Z", duration: 20 * 60),
+                session(id: 2, start: "2026-04-26T09:00:00Z", duration: 20 * 60),
+                session(id: 3, start: "2026-05-01T09:00:00Z", duration: 20 * 60)
+            ],
+            events: [
+                event(.temporaryDisableStarted, at: "2026-04-26T14:00:00Z", duration: 60 * 60)
+            ]
+        )
+
+        XCTAssertEqual(snapshot.days.count, 30)
+        XCTAssertEqual(snapshot.activeDays, 2)
+        XCTAssertEqual(snapshot.exceptionDays, 1)
+        XCTAssertEqual(snapshot.temporaryDisableSeconds, 60 * 60)
+        XCTAssertEqual(calendar.component(.month, from: snapshot.previousMonthStart), 3)
+        XCTAssertEqual(calendar.component(.month, from: snapshot.nextMonthStart), 5)
     }
 }
