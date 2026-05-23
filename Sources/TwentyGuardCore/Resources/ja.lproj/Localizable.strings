@@ -8,6 +8,10 @@
 "loginAtStartup" = "ログイン時に起動";
 "showCountdown" = "メニューバーにカウントダウン表示";
 "testBreak" = "今すぐ休憩";
+"temporaryDisableOneHour" = "1時間一時停止";
+"temporaryDisableActiveStatus" = "一時停止中";
+"temporaryDisableEndNow" = "保護を再開";
+"temporaryDisableUnavailableNight" = "夜間ロック中は使用不可";
 "quit" = "終了";
 "minutes" = "分";
 "seconds" = "秒";

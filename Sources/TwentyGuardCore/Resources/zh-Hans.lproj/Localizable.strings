@@ -8,6 +8,10 @@
 "loginAtStartup" = "登录时启动";
 "showCountdown" = "在菜单栏显示倒计时";
 "testBreak" = "现在休息";
+"temporaryDisableOneHour" = "临时禁用 1 小时";
+"temporaryDisableActiveStatus" = "临时禁用";
+"temporaryDisableEndNow" = "恢复保护";
+"temporaryDisableUnavailableNight" = "夜间禁用中不可用";
 "quit" = "退出";
 "minutes" = "分钟";
 "seconds" = "秒";

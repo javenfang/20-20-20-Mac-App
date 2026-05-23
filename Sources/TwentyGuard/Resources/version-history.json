@@ -7,8 +7,19 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.5.5",
+  "current_version": "1.6.0",
   "versions": [
+    {
+      "version": "1.6.0",
+      "date": "2026-05-23",
+      "changes": [
+        "Added a one-hour temporary disable mode for meetings and other special situations",
+        "Paused active work, break, and postpone timers while temporary disable is active, then resumed normal protection with a fresh work cycle",
+        "Kept Night Screen Lock authoritative: temporary disable cannot start during night lock or night override, and night lock interrupts an active temporary disable",
+        "Persisted temporary disable state across app restarts and added menu/status countdowns",
+        "Added Core policy tests and localization coverage for temporary disable"
+      ]
+    },
     {
       "version": "1.5.5",
       "date": "2026-05-08",

@@ -48,6 +48,8 @@ at night when you need a real boundary.
   35, and 45 minute options.
 - **Postpone limits**: postpone by 1, 2, or 5 minutes without delaying breaks
   forever.
+- **Temporary disable**: pause break enforcement for one hour during meetings,
+  then resume normal protection automatically.
 - **Eye health report**: opens with a clear verdict, then shows completion,
   postpone, and recent-day details.
 - **Night screen lock**: gradually tightens screen-use time in the evening, then
@@ -71,6 +73,8 @@ Gatekeeper.
 
 - Click the menu bar icon to switch between 20-20-20 mode and custom mode.
 - Use **Break Now** when you want an immediate rest.
+- Use **Disable for 1 Hour** before meetings or special focused sessions; it is
+  not available during Night Screen Lock.
 - During a break, use `Command-1`, `Command-2`, or `Command-5` to postpone within
   the configured limit.
 - Open **Eye Health Report** to see whether today's pattern is healthy or which

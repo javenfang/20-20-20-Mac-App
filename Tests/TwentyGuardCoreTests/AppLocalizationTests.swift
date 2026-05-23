@@ -80,6 +80,20 @@ final class AppLocalizationTests: XCTestCase {
         }
     }
 
+    func testTemporaryDisableLocalizationsAreComplete() {
+        let requiredKeys: Set<String> = [
+            "temporaryDisableOneHour",
+            "temporaryDisableActiveStatus",
+            "temporaryDisableEndNow",
+            "temporaryDisableUnavailableNight"
+        ]
+
+        for language in AppLocalization.supportedLanguageCodes {
+            let keys = AppLocalization.localizationKeys(language: language)
+            XCTAssertTrue(requiredKeys.isSubset(of: keys), "\(language) must include all temporary disable keys")
+        }
+    }
+
     func testFindsCoreResourceBundleInStandardAppResourcesDirectory() throws {
         let appURL = temporaryDirectory()
             .appendingPathComponent("TwentyGuard.app", isDirectory: true)

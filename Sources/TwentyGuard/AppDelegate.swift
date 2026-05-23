@@ -20,11 +20,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         static let legacyTestingExit = "nightTestingExitEnabled"
     }
 
+    private enum TemporaryDisableDefaults {
+        static let startedAt = "temporaryDisableStartedAt"
+        static let until = "temporaryDisableUntil"
+    }
+
     private var statusBarItem: NSStatusItem!
     private var menu: NSMenu!
     private var workTimer: Timer?
     private var breakTimer: Timer?
     private var nightLockTimer: Timer?
+    private var temporaryDisableTimer: Timer?
     private var menuUpdateTimer: Timer?
     private var stateSnapshotTimer: Timer?
     
@@ -42,6 +48,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var breakOverlays: [BreakOverlayWindow] = []
     private var nightLockOverlays: [NightRestrictionOverlayWindow] = []
     private var loginItemMenuItem: NSMenuItem!
+    private var temporaryDisableMenuItem: NSMenuItem!
     private var nightRestrictionMenuItem: NSMenuItem!
     private var healthStatsWindow: StatsDashboardWindow?
     
@@ -67,8 +74,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Night restriction settings
     private let nightPolicy = NightRestrictionPolicy()
     private let nightOverridePolicy = NightOverridePolicy()
+    private let temporaryDisablePolicy = TemporaryDisablePolicy()
     private var nightRestrictionSettings = NightRestrictionSettings()
     private var nightOverrideState: NightOverrideState?
+    private var temporaryDisableState: TemporaryDisableState?
     
     // Language settings
     private var currentLanguage: String = ""
@@ -116,6 +125,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private var isPostponeActive: Bool {
         return postponeStartTime != nil && postponeTimeRemaining > 0
+    }
+
+    private var temporaryDisableRemainingSeconds: Int {
+        temporaryDisablePolicy.remainingSeconds(temporaryDisableState, now: Date())
+    }
+
+    private var isTemporaryDisableActive: Bool {
+        temporaryDisablePolicy.isActive(temporaryDisableState, now: Date())
     }
     
     // MARK: - Localization
@@ -203,6 +220,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func restoreSessionIfNeeded() -> Bool {
         logManager.logEvent(.appLaunched, context: ["debug": "restore_start"])
+
+        if restoreTemporaryDisableIfNeeded() {
+            return true
+        }
 
         if let savedState = eventRecorder.restoreSessionState() {
             logManager.logEvent(.appLaunched, context: ["debug": "decode_success", "workStartTime": savedState.workStartTime?.description ?? "nil"])
@@ -311,6 +332,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func startUIUpdateTimer() {
+        if isTemporaryDisableActive {
+            startTemporaryDisableTimer()
+            return
+        }
+
         workTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateWorkTimer()
         }
@@ -353,6 +379,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         cleanupLegacyNightOverrideDefaults()
         nightOverrideState = loadNightOverrideState()
+        temporaryDisableState = loadTemporaryDisableState()
         clearExpiredNightOverride()
 
         // Apply the loaded settings
@@ -421,6 +448,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         testBreakItem.target = self
         testBreakItem.keyEquivalentModifierMask = .command
         menu.addItem(testBreakItem)
+
+        temporaryDisableMenuItem = NSMenuItem(title: localized("temporaryDisableOneHour"), action: #selector(toggleTemporaryDisable), keyEquivalent: "d")
+        temporaryDisableMenuItem.target = self
+        temporaryDisableMenuItem.keyEquivalentModifierMask = .command
+        updateTemporaryDisableMenuItem()
+        menu.addItem(temporaryDisableMenuItem)
         
         let healthStatsItem = NSMenuItem(title: localized("eyeHealthStats"), action: #selector(showHealthStats), keyEquivalent: "s")
         healthStatsItem.target = self
@@ -716,6 +749,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.removeObject(forKey: NightOverrideDefaults.numberForNight)
     }
 
+    private func loadTemporaryDisableState() -> TemporaryDisableState? {
+        guard let startedAt = UserDefaults.standard.object(forKey: TemporaryDisableDefaults.startedAt) as? Date,
+              let until = UserDefaults.standard.object(forKey: TemporaryDisableDefaults.until) as? Date,
+              until > startedAt else {
+            clearTemporaryDisableState()
+            return nil
+        }
+
+        return TemporaryDisableState(startedAt: startedAt, until: until)
+    }
+
+    private func saveTemporaryDisableState() {
+        guard let state = temporaryDisableState else {
+            clearTemporaryDisableState()
+            return
+        }
+
+        UserDefaults.standard.set(state.startedAt, forKey: TemporaryDisableDefaults.startedAt)
+        UserDefaults.standard.set(state.until, forKey: TemporaryDisableDefaults.until)
+    }
+
+    private func clearTemporaryDisableState() {
+        UserDefaults.standard.removeObject(forKey: TemporaryDisableDefaults.startedAt)
+        UserDefaults.standard.removeObject(forKey: TemporaryDisableDefaults.until)
+    }
+
     private func nightOverrideCount(for nightKey: String) -> Int {
         guard UserDefaults.standard.string(forKey: NightOverrideDefaults.countNightKey) == nightKey else {
             return 0
@@ -906,6 +965,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func statusBarButtonClicked() {
         statusBarItem.menu = menu
         statusBarItem.button?.performClick(nil)
+    }
+
+    @objc private func toggleTemporaryDisable() {
+        if isTemporaryDisableActive {
+            finishTemporaryDisable(reason: "manual_end", startFreshWorkSession: true)
+        } else {
+            beginTemporaryDisable(reason: "manual_start")
+        }
     }
     
     @objc private func triggerTestBreak() {
@@ -1186,6 +1253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         workTimer?.invalidate()
         breakTimer?.invalidate()
         nightLockTimer?.invalidate()
+        temporaryDisableTimer?.invalidate()
         menuUpdateTimer?.invalidate()
         stateSnapshotTimer?.invalidate()
         for overlay in nightLockOverlays {
@@ -1411,6 +1479,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 button.title = " " + localized("nightOverrideActiveStatus") + " " + formatStatusBarTime(Int(max(0, state.until.timeIntervalSince(Date()))))
             } else if nightStatus.isLocked {
                 button.title = " " + localized("nightLockedStatus")
+            } else if isTemporaryDisableActive {
+                button.title = " " + localized("temporaryDisableActiveStatus") + " " + formatStatusBarTime(temporaryDisableRemainingSeconds)
             } else if showCountdownInStatusBar {
                 // 如果处于推迟状态，显示推迟倒计时
                 if isPostponeActive {
@@ -1505,9 +1575,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         saveNightOverrideState()
     }
 
+    private func restoreTemporaryDisableIfNeeded() -> Bool {
+        guard let state = temporaryDisableState else { return false }
+
+        let status = currentNightStatus()
+        if temporaryDisablePolicy.shouldInterruptActiveDisable(for: status) {
+            finishTemporaryDisable(reason: "night_restriction", startFreshWorkSession: false)
+            return false
+        }
+
+        if temporaryDisablePolicy.isActive(state, now: Date()) {
+            logManager.logEvent(.appLaunched, context: ["debug": "restore_temporary_disable"])
+            workSessionStartTime = nil
+            breakSessionStartTime = nil
+            postponeStartTime = nil
+            postponeDuration = 0
+            startTemporaryDisableTimer()
+            return true
+        }
+
+        expireTemporaryDisable(state, startFreshWorkSession: false)
+        return false
+    }
+
     @discardableResult
     private func applyNightRestrictionState(reason: String) -> Bool {
         let status = currentNightStatus()
+
+        if temporaryDisableState != nil,
+           temporaryDisablePolicy.shouldInterruptActiveDisable(for: status) {
+            finishTemporaryDisable(reason: "night_restriction", startFreshWorkSession: false)
+        }
 
         switch status.phase {
         case .locked(let unlockTime):
@@ -1515,6 +1613,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return true
 
         case .windDown(let limitSeconds, _, _, _, _):
+            if isTemporaryDisableActive {
+                return true
+            }
+
             if !nightLockOverlays.isEmpty {
                 leaveNightLock(startFreshWorkSession: true)
                 return true
@@ -1532,6 +1634,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return false
 
         case .normal:
+            if isTemporaryDisableActive {
+                return true
+            }
+
             if !nightLockOverlays.isEmpty {
                 leaveNightLock(startFreshWorkSession: true)
                 return true
@@ -1694,6 +1800,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             timerMenuItem.title = "\(localized("nightOverrideActiveStatus")) · \(formatStatusBarTime(Int(max(0, state.until.timeIntervalSince(Date())))))"
         } else if nightStatus.isLocked {
             timerMenuItem.title = "\(localized("nightLockedStatus")) · \(localized("nightUnlockTime")) \(nightStatus.schedule.unlockClockTime.displayString)"
+        } else if isTemporaryDisableActive {
+            timerMenuItem.title = "\(localized("temporaryDisableActiveStatus")) · \(formatStatusBarTime(temporaryDisableRemainingSeconds))"
         } else if isPostponeActive {
             // 推迟期间显示推迟倒计时
             let totalSeconds = Int(postponeTimeRemaining)
@@ -1721,6 +1829,124 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isCustomMode: isCustomMode
         )
     }
+
+    private func updateTemporaryDisableMenuItem() {
+        guard temporaryDisableMenuItem != nil else { return }
+
+        let status = currentNightStatus()
+        if isTemporaryDisableActive {
+            temporaryDisableMenuItem.title = "\(localized("temporaryDisableEndNow")) · \(formatStatusBarTime(temporaryDisableRemainingSeconds))"
+            temporaryDisableMenuItem.isEnabled = true
+            return
+        }
+
+        temporaryDisableMenuItem.title = temporaryDisablePolicy.canStart(in: status)
+            ? localized("temporaryDisableOneHour")
+            : localized("temporaryDisableUnavailableNight")
+        temporaryDisableMenuItem.isEnabled = temporaryDisablePolicy.canStart(in: status)
+    }
+
+    private func beginTemporaryDisable(reason: String) {
+        let status = currentNightStatus()
+        guard temporaryDisablePolicy.canStart(in: status) else {
+            updateTemporaryDisableMenuItem()
+            _ = applyNightRestrictionState(reason: "temporary_disable_denied")
+            return
+        }
+
+        let state = temporaryDisablePolicy.grant(now: Date())
+        temporaryDisableState = state
+        saveTemporaryDisableState()
+        eventRecorder.recordTemporaryDisableStarted(state: state, reason: reason)
+
+        workTimer?.invalidate()
+        workTimer = nil
+        breakTimer?.invalidate()
+        breakTimer = nil
+
+        if !breakOverlays.isEmpty {
+            cleanupBreakOverlays()
+        }
+
+        workSessionStartTime = nil
+        breakSessionStartTime = nil
+        postponeStartTime = nil
+        postponeDuration = 0
+        totalPostponedTime = 0
+        saveCurrentSessionState()
+
+        startTemporaryDisableTimer()
+        updateTemporaryDisableMenuItem()
+        updateStatusBarTitle()
+        updateMenuTimer()
+    }
+
+    private func startTemporaryDisableTimer() {
+        temporaryDisableTimer?.invalidate()
+        updateTemporaryDisableMenuItem()
+        updateStatusBarTitle()
+        updateMenuTimer()
+
+        temporaryDisableTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateTemporaryDisableTimer()
+        }
+    }
+
+    private func updateTemporaryDisableTimer() {
+        guard let state = temporaryDisableState else {
+            temporaryDisableTimer?.invalidate()
+            temporaryDisableTimer = nil
+            return
+        }
+
+        let status = currentNightStatus()
+        if temporaryDisablePolicy.shouldInterruptActiveDisable(for: status) {
+            finishTemporaryDisable(reason: "night_restriction", startFreshWorkSession: false)
+            _ = applyNightRestrictionState(reason: "temporary_disable_interrupted")
+            return
+        }
+
+        guard temporaryDisablePolicy.isActive(state, now: Date()) else {
+            expireTemporaryDisable(state, startFreshWorkSession: true)
+            return
+        }
+
+        updateTemporaryDisableMenuItem()
+        updateStatusBarTitle()
+        updateMenuTimer()
+    }
+
+    private func finishTemporaryDisable(reason: String, startFreshWorkSession: Bool) {
+        guard let state = temporaryDisableState else { return }
+
+        temporaryDisableTimer?.invalidate()
+        temporaryDisableTimer = nil
+        temporaryDisableState = nil
+        saveTemporaryDisableState()
+        eventRecorder.recordTemporaryDisableEnded(state: state, reason: reason)
+        updateTemporaryDisableMenuItem()
+        updateStatusBarTitle()
+        updateMenuTimer()
+
+        if startFreshWorkSession {
+            startWorkTimer()
+        }
+    }
+
+    private func expireTemporaryDisable(_ state: TemporaryDisableState, startFreshWorkSession: Bool) {
+        temporaryDisableTimer?.invalidate()
+        temporaryDisableTimer = nil
+        temporaryDisableState = nil
+        saveTemporaryDisableState()
+        eventRecorder.recordTemporaryDisableExpired(state: state)
+        updateTemporaryDisableMenuItem()
+        updateStatusBarTitle()
+        updateMenuTimer()
+
+        if startFreshWorkSession {
+            startWorkTimer()
+        }
+    }
     
     private func startStateSnapshotTimer() {
         stateSnapshotTimer?.invalidate()
@@ -1735,7 +1961,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func recordStateSnapshot() {
-        let currentMode = isCustomMode ? "custom" : "default"
+        let currentMode = isTemporaryDisableActive ? "temporary_disable" : (isCustomMode ? "custom" : "default")
         
         logManager.logStateSnapshot(
             workStartTime: workSessionStartTime,
@@ -2166,6 +2392,7 @@ extension AppDelegate: NSMenuDelegate {
         updateMenuTimer()
         updateLoginItemState()
         updateShowCountdownState()
+        updateTemporaryDisableMenuItem()
         updateModeMenuStates()
         rebuildNightRestrictionMenu()
         startMenuUpdateTimer()

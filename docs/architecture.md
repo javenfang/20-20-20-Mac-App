@@ -1,7 +1,7 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.5.5
-> **最后更新**: 2026-05-08
+> **文档版本**: v1.6.0
+> **最后更新**: 2026-05-23
 > **维护者**: Javen Fang (@javenfang)
 
 ---
@@ -118,6 +118,7 @@ Sources/TwentyGuard/
 - 菜单栏UI管理
 - 系统事件响应
 - 会话状态管理
+- 临时禁用 1 小时状态管理
 - 夜间禁用和正式破例状态管理
 
 **关键设计**:
@@ -127,6 +128,7 @@ Sources/TwentyGuard/
 - ⭐ v1.2.0 更新：默认模式推迟总计最多 5 分钟，自定义模式可选 5/10 分钟
 - ⭐ v1.5.4 更新：夜间禁用移除测试出口，改为带等待、原因和确认句的正式破例流程
 - ⭐ v1.5.5 修复：推迟休息状态持久化，应用重启后不再误开新工作周期
+- ⭐ v1.6.0 新增：会议等特殊场合可临时禁用 1 小时，但夜间禁用和夜间破例优先
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -390,6 +392,23 @@ stateDiagram-v2
 - UI状态更新: `updateBreakOverlaysPostponeStatus()`
 - 窗口状态更新: [`BreakOverlayWindow.swift:updatePostponeStatus()`](../Sources/TwentyGuard/BreakOverlayWindow.swift)
 
+### 4.4 临时禁用逻辑 ⭐ v1.6.0 新增
+
+**设计原则**: 临时禁用是会议等特殊场合的短时暂停，不修改工作/休息设置，也不绕过夜间边界。
+
+**实现要点**:
+- 使用 `TemporaryDisableState` 记录 `startedAt` 和 `until`
+- `TemporaryDisablePolicy.disableSeconds` 固定为 60 分钟
+- 启动后停止工作、休息、推迟计时，清理休息遮罩，并结束当前统计会话
+- 菜单栏和状态栏显示临时禁用倒计时
+- 到期或手动结束后清理状态，并启动新的正常工作周期
+- 状态保存到 UserDefaults，应用重启后仍能继续剩余禁用时间
+
+**夜间优先级**:
+- `NightRestrictionStatus.isLocked == true` 时不可启动临时禁用
+- `NightRestrictionStatus.isOverrideActive == true` 时不可启动临时禁用，避免把正式夜间破例扩展成 1 小时
+- 临时禁用跨入夜间完全禁用时，`TemporaryDisablePolicy.shouldInterruptActiveDisable` 会清理临时禁用并交回夜间锁定逻辑
+
 ---
 
 ## 5. 事件处理系统
@@ -461,6 +480,7 @@ graph TB
 - `nightRestrictionEnabled` / `nightWindDownStartMinutes` / `nightLockStartMinutes` / `nightUnlockMinutes`: 夜间禁用配置
 - `nightOverrideGrantedAt` / `nightOverrideUntil` / `nightOverrideReason` / `nightOverrideNightKey` / `nightOverrideNumberForNight`: 活跃夜间破例状态
 - `nightOverrideCountNightKey` / `nightOverrideCountForNight`: 当前夜晚破例次数，用于递增等待成本
+- `temporaryDisableStartedAt` / `temporaryDisableUntil`: 活跃临时禁用状态
 
 **时机**: 应用启动时读取 (`loadSettings`)，设置变更时立即保存 (`saveSettings`)
 
@@ -593,7 +613,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.5.5</string>
+<string>1.6.0</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -624,8 +644,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.5.5 当前为功能修复版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.5.5.dmg`，再更新本节发布验证结果。
+v1.6.0 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.6.0.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -853,6 +873,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.5.3 | 2026-05-07 | 修复分发版启动时 SwiftPM resource bundle 查找路径导致的崩溃；补齐标准 app bundle 元数据；新增 app/DMG 打包结构校验和资源查找回归测试；发布签名公证 DMG |
 | v1.5.4 | 2026-05-08 | 夜间禁用移除测试出口，新增正式破例状态机、递增等待成本、确认句、事件日志、统计汇总和本地化回归测试 |
 | v1.5.5 | 2026-05-08 | 推迟休息状态纳入 SessionState，重启后继续推迟倒计时或立即恢复欠下的休息；菜单栏推迟文案从“屏幕使用”改为“推迟休息”；新增会话恢复回归测试 |
+| v1.6.0 | 2026-05-23 | 新增临时禁用 1 小时状态和策略；暂停当前工作/休息/推迟计时并在到期后开启新工作周期；夜间禁用和夜间破例优先；新增策略与本地化测试 |
 
 ### B. 相关文档
 
@@ -868,5 +889,5 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 
 ---
 
-**最后更新**: 2026-05-08
-**文档版本**: v1.5.5
+**最后更新**: 2026-05-23
+**文档版本**: v1.6.0

@@ -8,6 +8,10 @@
 "loginAtStartup" = "Iniciar al Arranque";
 "showCountdown" = "Mostrar Cuenta Regresiva";
 "testBreak" = "Descansar Ahora";
+"temporaryDisableOneHour" = "Desactivar 1 hora";
+"temporaryDisableActiveStatus" = "Desactivado";
+"temporaryDisableEndNow" = "Reanudar protección";
+"temporaryDisableUnavailableNight" = "No disponible durante el bloqueo nocturno";
 "quit" = "Salir";
 "minutes" = "min";
 "seconds" = "seg";

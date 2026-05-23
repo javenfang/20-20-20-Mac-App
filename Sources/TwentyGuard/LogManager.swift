@@ -40,6 +40,9 @@ struct LogEvent: Codable {
         case nightOverrideGranted = "night_override_granted"
         case nightOverrideCancelled = "night_override_cancelled"
         case nightOverrideExpired = "night_override_expired"
+        case temporaryDisableStarted = "temporary_disable_started"
+        case temporaryDisableEnded = "temporary_disable_ended"
+        case temporaryDisableExpired = "temporary_disable_expired"
     }
 }
 

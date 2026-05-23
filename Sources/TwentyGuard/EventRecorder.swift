@@ -209,12 +209,43 @@ class EventRecorder {
         logManager.logEvent(.nightOverrideExpired, context: context)
     }
 
+    // MARK: - Temporary Disable
+
+    func recordTemporaryDisableStarted(state: TemporaryDisableState, reason: String) {
+        statsDB.endActiveSession()
+        var context = temporaryDisableContext(state: state)
+        context["reason"] = reason
+        logManager.logEvent(
+            .temporaryDisableStarted,
+            duration: TimeInterval(TemporaryDisablePolicy.disableSeconds),
+            context: context
+        )
+    }
+
+    func recordTemporaryDisableEnded(state: TemporaryDisableState, reason: String) {
+        var context = temporaryDisableContext(state: state)
+        context["reason"] = reason
+        logManager.logEvent(.temporaryDisableEnded, context: context)
+    }
+
+    func recordTemporaryDisableExpired(state: TemporaryDisableState) {
+        logManager.logEvent(.temporaryDisableExpired, context: temporaryDisableContext(state: state))
+    }
+
     private func nightOverrideContext(nightKey: String, request: NightOverrideRequest) -> [String: String] {
         [
             "night_key": nightKey,
             "override_number": "\(request.overrideNumberForNight)",
             "wait_seconds": "\(request.waitSeconds)",
             "unlock_minutes": "\(request.unlockSeconds / 60)"
+        ]
+    }
+
+    private func temporaryDisableContext(state: TemporaryDisableState) -> [String: String] {
+        [
+            "started_at": formattedLogDate(state.startedAt),
+            "disable_until": formattedLogDate(state.until),
+            "disable_minutes": "\(TemporaryDisablePolicy.disableSeconds / 60)"
         ]
     }
 

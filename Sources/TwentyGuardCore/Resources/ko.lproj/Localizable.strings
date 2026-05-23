@@ -8,6 +8,10 @@
 "loginAtStartup" = "로그인 시 시작";
 "showCountdown" = "메뉴바에 카운트다운 표시";
 "testBreak" = "지금 휴식";
+"temporaryDisableOneHour" = "1시간 일시 비활성화";
+"temporaryDisableActiveStatus" = "일시 비활성화";
+"temporaryDisableEndNow" = "보호 다시 시작";
+"temporaryDisableUnavailableNight" = "야간 잠금 중에는 사용할 수 없음";
 "quit" = "종료";
 "minutes" = "분";
 "seconds" = "초";

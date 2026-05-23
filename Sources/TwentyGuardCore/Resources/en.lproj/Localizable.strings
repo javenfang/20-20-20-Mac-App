@@ -8,6 +8,10 @@
 "loginAtStartup" = "Launch at Login";
 "showCountdown" = "Show Countdown in Menu Bar";
 "testBreak" = "Break Now";
+"temporaryDisableOneHour" = "Disable for 1 Hour";
+"temporaryDisableActiveStatus" = "Disabled";
+"temporaryDisableEndNow" = "Resume Protection";
+"temporaryDisableUnavailableNight" = "Unavailable During Night Lock";
 "quit" = "Quit";
 "minutes" = "min";
 "seconds" = "sec";
