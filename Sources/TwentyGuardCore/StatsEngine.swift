@@ -136,31 +136,48 @@ public struct StatsQualitySummary: Equatable, Sendable {
     public var excludedStaleSessions: Int
     public var excludedStaleSessionIDs: [Int64]
     public var activeBreakRecords: Int
+    public var activeBreakSessionIDs: [Int64]
     public var interruptedBreakRecords: Int
+    public var interruptedBreakSessionIDs: [Int64]
     public var unclosedPostponeRecords: Int
+    public var unclosedPostponeSessionIDs: [Int64]
 
     public init(
         ignoredShortSessions: Int = 0,
         excludedStaleSessions: Int = 0,
         excludedStaleSessionIDs: [Int64] = [],
         activeBreakRecords: Int = 0,
+        activeBreakSessionIDs: [Int64] = [],
         interruptedBreakRecords: Int = 0,
-        unclosedPostponeRecords: Int = 0
+        interruptedBreakSessionIDs: [Int64] = [],
+        unclosedPostponeRecords: Int = 0,
+        unclosedPostponeSessionIDs: [Int64] = []
     ) {
         self.ignoredShortSessions = ignoredShortSessions
         self.excludedStaleSessions = excludedStaleSessions
         self.excludedStaleSessionIDs = excludedStaleSessionIDs
         self.activeBreakRecords = activeBreakRecords
+        self.activeBreakSessionIDs = activeBreakSessionIDs
         self.interruptedBreakRecords = interruptedBreakRecords
+        self.interruptedBreakSessionIDs = interruptedBreakSessionIDs
         self.unclosedPostponeRecords = unclosedPostponeRecords
+        self.unclosedPostponeSessionIDs = unclosedPostponeSessionIDs
     }
 
     public var hasIssues: Bool {
-        ignoredShortSessions > 0 ||
-            excludedStaleSessions > 0 ||
+        excludedStaleSessions > 0 ||
             activeBreakRecords > 0 ||
             interruptedBreakRecords > 0 ||
             unclosedPostponeRecords > 0
+    }
+
+    public var diagnosticSessionIDs: [Int64] {
+        var seen = Set<Int64>()
+        let all = excludedStaleSessionIDs +
+            activeBreakSessionIDs +
+            interruptedBreakSessionIDs +
+            unclosedPostponeSessionIDs
+        return all.filter { seen.insert($0).inserted }
     }
 
     public mutating func merge(_ other: StatsQualitySummary) {
@@ -168,8 +185,11 @@ public struct StatsQualitySummary: Equatable, Sendable {
         excludedStaleSessions += other.excludedStaleSessions
         excludedStaleSessionIDs.append(contentsOf: other.excludedStaleSessionIDs)
         activeBreakRecords += other.activeBreakRecords
+        activeBreakSessionIDs.append(contentsOf: other.activeBreakSessionIDs)
         interruptedBreakRecords += other.interruptedBreakRecords
+        interruptedBreakSessionIDs.append(contentsOf: other.interruptedBreakSessionIDs)
         unclosedPostponeRecords += other.unclosedPostponeRecords
+        unclosedPostponeSessionIDs.append(contentsOf: other.unclosedPostponeSessionIDs)
     }
 }
 
@@ -692,15 +712,21 @@ public struct StatsEngine: Sendable {
             switch breakRecord.status {
             case .active:
                 quality.activeBreakRecords += 1
+                quality.activeBreakSessionIDs.append(record.id)
             case .interrupted:
                 quality.interruptedBreakRecords += 1
+                quality.interruptedBreakSessionIDs.append(record.id)
             case .completed, .unknown:
                 break
             }
         }
 
-        quality.unclosedPostponeRecords += record.postpones.filter { postpone in
+        let unclosedPostpones = record.postpones.filter { postpone in
             postpone.status == .active || postpone.endTime == nil
-        }.count
+        }
+        if !unclosedPostpones.isEmpty {
+            quality.unclosedPostponeRecords += unclosedPostpones.count
+            quality.unclosedPostponeSessionIDs.append(record.id)
+        }
     }
 }

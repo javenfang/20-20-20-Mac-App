@@ -571,6 +571,7 @@ class StatsDatabase {
                     }
 
                     let now = Date().timeIntervalSince1970
+                    try self.closeOpenPostponesInternal(sessionId: sessionId, at: now, activeStatus: "completed")
                     try self.endSessionInternal(sessionId: sessionId, at: now)
 
                     // Create break_info JSON
@@ -671,6 +672,7 @@ class StatsDatabase {
 
                     // Update break_info
                     let now = Date().timeIntervalSince1970
+                    try self.closeOpenPostponesInternal(sessionId: sessionId, at: now, activeStatus: "completed")
                     breakInfo.end_time = now
                     breakInfo.actual_duration = Int(now - breakInfo.start_time)
                     breakInfo.status = "completed"
@@ -744,9 +746,11 @@ class StatsDatabase {
                     }
 
                     // 2. Add new postpone record
+                    let now = Date().timeIntervalSince1970
+                    try self.interruptActiveBreakInternal(sessionId: sessionId, at: now)
                     let newPostpone = PostponeRecord(
                         duration: minutes * 60,
-                        start_time: Date().timeIntervalSince1970,
+                        start_time: now,
                         end_time: nil,
                         status: "active"
                     )
@@ -785,6 +789,205 @@ class StatsDatabase {
         }
     }
 
+    private func interruptActiveBreakInternal(sessionId: Int64, at timestamp: TimeInterval) throws {
+        let selectSQL = "SELECT break_info FROM sessions WHERE id = ?"
+        var selectStmt: OpaquePointer?
+        defer { sqlite3_finalize(selectStmt) }
+
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare active break select")
+        }
+
+        sqlite3_bind_int64(selectStmt, 1, sessionId)
+
+        guard sqlite3_step(selectStmt) == SQLITE_ROW,
+              let jsonPtr = sqlite3_column_text(selectStmt, 0) else {
+            return
+        }
+
+        let jsonString = String(cString: jsonPtr)
+        guard var breakInfo = parseBreakInfo(jsonString), breakInfo.status == "active" else {
+            return
+        }
+
+        breakInfo.end_time = timestamp
+        breakInfo.actual_duration = max(0, Int(timestamp - breakInfo.start_time))
+        breakInfo.status = "interrupted"
+
+        let updateSQL = """
+            UPDATE sessions
+            SET break_info = ?
+            WHERE id = ?
+        """
+
+        var updateStmt: OpaquePointer?
+        defer { sqlite3_finalize(updateStmt) }
+
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare active break interruption")
+        }
+
+        if let json = serializeBreakInfo(breakInfo) {
+            sqlite3_bind_text(updateStmt, 1, (json as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(updateStmt, 1)
+        }
+        sqlite3_bind_int64(updateStmt, 2, sessionId)
+
+        guard sqlite3_step(updateStmt) == SQLITE_DONE else {
+            throw DatabaseError.queryFailed("Failed to interrupt active break")
+        }
+    }
+
+    private func interruptOpenProtectionRecordsInternal(at timestamp: TimeInterval) throws {
+        try closeOpenBreaksInternal(at: timestamp)
+        try closeOpenPostponesInternal(sessionId: nil, at: timestamp, activeStatus: "interrupted")
+    }
+
+    private func closeOpenBreaksInternal(at timestamp: TimeInterval) throws {
+        let selectSQL = """
+            SELECT id, break_info
+            FROM sessions
+            WHERE type = 'work'
+              AND break_info IS NOT NULL
+              AND break_completed = 0
+        """
+
+        var selectStmt: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare open break select")
+        }
+
+        var updates: [(Int64, BreakInfo)] = []
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            let sessionId = sqlite3_column_int64(selectStmt, 0)
+            guard let jsonPtr = sqlite3_column_text(selectStmt, 1) else { continue }
+            guard var breakInfo = parseBreakInfo(String(cString: jsonPtr)) else { continue }
+            guard breakInfo.status == "active" || breakInfo.end_time == nil else { continue }
+
+            if breakInfo.end_time == nil {
+                breakInfo.end_time = timestamp
+            }
+            if breakInfo.actual_duration == nil {
+                breakInfo.actual_duration = max(0, Int(timestamp - breakInfo.start_time))
+            }
+            if breakInfo.status == "active" {
+                breakInfo.status = "interrupted"
+            }
+
+            updates.append((sessionId, breakInfo))
+        }
+        sqlite3_finalize(selectStmt)
+
+        for (sessionId, breakInfo) in updates {
+            try updateBreakInfoInternal(sessionId: sessionId, breakInfo: breakInfo)
+        }
+    }
+
+    private func updateBreakInfoInternal(sessionId: Int64, breakInfo: BreakInfo) throws {
+        let updateSQL = """
+            UPDATE sessions
+            SET break_info = ?
+            WHERE id = ?
+        """
+
+        var updateStmt: OpaquePointer?
+        defer { sqlite3_finalize(updateStmt) }
+
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare break_info update")
+        }
+
+        if let json = serializeBreakInfo(breakInfo) {
+            sqlite3_bind_text(updateStmt, 1, (json as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(updateStmt, 1)
+        }
+        sqlite3_bind_int64(updateStmt, 2, sessionId)
+
+        guard sqlite3_step(updateStmt) == SQLITE_DONE else {
+            throw DatabaseError.queryFailed("Failed to update break_info")
+        }
+    }
+
+    private func closeOpenPostponesInternal(sessionId targetSessionId: Int64?, at timestamp: TimeInterval, activeStatus: String) throws {
+        let selectSQL: String
+        if targetSessionId == nil {
+            selectSQL = """
+                SELECT id, postpones
+                FROM sessions
+                WHERE type = 'work'
+                  AND postpones IS NOT NULL
+                  AND postpones != ''
+            """
+        } else {
+            selectSQL = "SELECT id, postpones FROM sessions WHERE id = ?"
+        }
+
+        var selectStmt: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare open postpone select")
+        }
+
+        if let targetSessionId {
+            sqlite3_bind_int64(selectStmt, 1, targetSessionId)
+        }
+
+        var updates: [(Int64, [PostponeRecord])] = []
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            let sessionId = sqlite3_column_int64(selectStmt, 0)
+            guard let jsonPtr = sqlite3_column_text(selectStmt, 1) else { continue }
+
+            var postpones = parsePostpones(String(cString: jsonPtr))
+            var changed = false
+
+            for index in postpones.indices {
+                if postpones[index].end_time == nil {
+                    postpones[index].end_time = timestamp
+                    changed = true
+                }
+                if postpones[index].status == "active" {
+                    postpones[index].status = activeStatus
+                    changed = true
+                }
+            }
+
+            if changed {
+                updates.append((sessionId, postpones))
+            }
+        }
+        sqlite3_finalize(selectStmt)
+
+        for (sessionId, postpones) in updates {
+            try updatePostponesInternal(sessionId: sessionId, postpones: postpones)
+        }
+    }
+
+    private func updatePostponesInternal(sessionId: Int64, postpones: [PostponeRecord]) throws {
+        let updateSQL = """
+            UPDATE sessions
+            SET postpones = ?
+            WHERE id = ?
+        """
+
+        var updateStmt: OpaquePointer?
+        defer { sqlite3_finalize(updateStmt) }
+
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare postpones update")
+        }
+
+        let json = serializePostpones(postpones)
+        sqlite3_bind_text(updateStmt, 1, (json as NSString).utf8String, -1, nil)
+        sqlite3_bind_int64(updateStmt, 2, sessionId)
+
+        guard sqlite3_step(updateStmt) == SQLITE_DONE else {
+            throw DatabaseError.queryFailed("Failed to update postpones")
+        }
+    }
+
     func endActiveSession() {
         dbQueue.async { [weak self] in
             guard let self = self, self.isValid else { return }
@@ -798,6 +1001,9 @@ class StatsDatabase {
     }
 
     private func endActiveSessionInternal() throws {
+        let now = Date().timeIntervalSince1970
+        try interruptOpenProtectionRecordsInternal(at: now)
+
         let sql = """
             UPDATE sessions
             SET end_time = ?,
@@ -813,7 +1019,6 @@ class StatsDatabase {
             throw DatabaseError.queryFailed("Failed to prepare session end update")
         }
 
-        let now = Date().timeIntervalSince1970
         sqlite3_bind_double(statement, 1, now)
         sqlite3_bind_double(statement, 2, now)
 
@@ -910,8 +1115,11 @@ class StatsDatabase {
         let sql = """
             SELECT id FROM sessions
             WHERE type = 'work'
-              AND break_info IS NULL
               AND status IN ('active', 'completed')
+              AND (
+                break_info IS NULL
+                OR break_completed = 0
+              )
             ORDER BY start_time DESC
             LIMIT 1
         """

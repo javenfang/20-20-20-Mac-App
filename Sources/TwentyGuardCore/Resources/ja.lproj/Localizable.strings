@@ -124,6 +124,7 @@
 "statsActiveBreakRecordsFormat" = "未終了の休憩記録が %d 件あります。完了休憩には数えません。";
 "statsInterruptedBreakRecordsFormat" = "中断された休憩記録が %d 件あります。";
 "statsUnclosedPostponeRecordsFormat" = "終了マーカーのない延期記録が %d 件あります。延期回数には数えます。";
+"statsQualityDiagnosticSessionsFormat" = "影響を受けたセッションを特定しました: %@。";
 "verdictNoDataTitle" = "記録なし";
 "verdictNoDataReason" = "今日はまだ有効な作業セッションがありません";
 "verdictLongWorkTitle" = "作業が長すぎます";

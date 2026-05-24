@@ -124,6 +124,7 @@
 "statsActiveBreakRecordsFormat" = "끝나지 않은 휴식 기록 %d개가 있습니다. 완료한 휴식에는 포함하지 않습니다.";
 "statsInterruptedBreakRecordsFormat" = "중단된 휴식 기록 %d개가 있습니다.";
 "statsUnclosedPostponeRecordsFormat" = "종료 표시가 없는 연기 기록 %d개가 있습니다. 그래도 연기 횟수에는 포함됩니다.";
+"statsQualityDiagnosticSessionsFormat" = "영향받은 세션을 찾았습니다: %@.";
 "verdictNoDataTitle" = "기록 없음";
 "verdictNoDataReason" = "오늘 아직 유효한 작업 세션이 없습니다";
 "verdictLongWorkTitle" = "작업 시간이 너무 김";

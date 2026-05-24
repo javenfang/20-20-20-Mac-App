@@ -7,8 +7,18 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.7.2",
+  "current_version": "1.7.3",
   "versions": [
+    {
+      "version": "1.7.3",
+      "date": "2026-05-24",
+      "changes": [
+        "Closed postpone records when postponed breaks resume and completed the same break opportunity after the owed break finishes",
+        "Interrupted open break and postpone records when a new work session starts so stale active records do not pollute data quality",
+        "Stopped showing harmless sub-minute startup fragments in the data quality panel",
+        "Added affected session IDs to data quality diagnostics so abnormal records can be located directly"
+      ]
+    },
     {
       "version": "1.7.2",
       "date": "2026-05-23",

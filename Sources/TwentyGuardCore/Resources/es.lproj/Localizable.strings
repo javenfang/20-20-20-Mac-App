@@ -124,6 +124,7 @@
 "statsActiveBreakRecordsFormat" = "Se encontraron %d descansos sin terminar; no se cuentan como completados.";
 "statsInterruptedBreakRecordsFormat" = "Se encontraron %d descansos interrumpidos.";
 "statsUnclosedPostponeRecordsFormat" = "Se encontraron %d aplazamientos sin marcador de fin; todavía cuentan como aplazamientos.";
+"statsQualityDiagnosticSessionsFormat" = "Sesiones afectadas localizadas: %@.";
 "verdictNoDataTitle" = "Sin Registros";
 "verdictNoDataReason" = "Aún no hay sesiones de trabajo válidas hoy";
 "verdictLongWorkTitle" = "Trabajo Demasiado Largo";

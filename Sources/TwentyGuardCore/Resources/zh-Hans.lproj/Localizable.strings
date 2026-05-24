@@ -124,6 +124,7 @@
 "statsActiveBreakRecordsFormat" = "发现 %d 个未结束休息记录，未计入完成休息。";
 "statsInterruptedBreakRecordsFormat" = "发现 %d 个被中断的休息记录。";
 "statsUnclosedPostponeRecordsFormat" = "发现 %d 条推迟记录缺少结束标记；它们仍计入推迟次数。";
+"statsQualityDiagnosticSessionsFormat" = "已定位受影响会话：%@。";
 "verdictNoDataTitle" = "暂无记录";
 "verdictNoDataReason" = "今天还没有有效工作会话";
 "verdictLongWorkTitle" = "工作过长";

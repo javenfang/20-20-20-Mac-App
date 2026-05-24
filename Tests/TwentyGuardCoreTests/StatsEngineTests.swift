@@ -66,6 +66,7 @@ final class StatsEngineTests: XCTestCase {
 
         XCTAssertEqual(snapshot.today.workSessions, 1)
         XCTAssertEqual(snapshot.today.quality.ignoredShortSessions, 1)
+        XCTAssertFalse(snapshot.today.quality.hasIssues)
         XCTAssertEqual(snapshot.today.totalWorkSeconds, 20 * 60)
     }
 
@@ -82,6 +83,8 @@ final class StatsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.today.postponesByMinutes[1], 1)
         XCTAssertEqual(snapshot.today.postponesByMinutes[5], 1)
         XCTAssertEqual(snapshot.today.quality.unclosedPostponeRecords, 2)
+        XCTAssertEqual(snapshot.today.quality.unclosedPostponeSessionIDs, [1])
+        XCTAssertEqual(snapshot.today.quality.diagnosticSessionIDs, [1])
     }
 
     func testUsesSevenCalendarDaysIncludingToday() {
@@ -108,6 +111,7 @@ final class StatsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.today.totalWorkSeconds, 20 * 60)
         XCTAssertEqual(snapshot.today.quality.excludedStaleSessions, 1)
         XCTAssertEqual(snapshot.today.quality.excludedStaleSessionIDs, [1])
+        XCTAssertEqual(snapshot.today.quality.diagnosticSessionIDs, [1])
     }
 
     func testCompletionRateUsesBreakOpportunities() {
@@ -136,6 +140,7 @@ final class StatsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.today.completedBreaks, 1)
         XCTAssertEqual(snapshot.today.breakCompletionRate, 0.5)
         XCTAssertEqual(snapshot.today.quality.activeBreakRecords, 1)
+        XCTAssertEqual(snapshot.today.quality.activeBreakSessionIDs, [2])
     }
 
     func testAggregatesAppExitProtectionInterruptionsForActiveDays() {

@@ -883,9 +883,6 @@ final class StatsDashboardWindow: NSWindow {
         if quality.excludedStaleSessions > 0 {
             messages.append(localizedFormat("statsExcludedStaleSessionsFormat", quality.excludedStaleSessions))
         }
-        if quality.ignoredShortSessions > 0 {
-            messages.append(localizedFormat("statsIgnoredShortSessionsFormat", quality.ignoredShortSessions))
-        }
         if quality.activeBreakRecords > 0 {
             messages.append(localizedFormat("statsActiveBreakRecordsFormat", quality.activeBreakRecords))
         }
@@ -895,8 +892,20 @@ final class StatsDashboardWindow: NSWindow {
         if quality.unclosedPostponeRecords > 0 {
             messages.append(localizedFormat("statsUnclosedPostponeRecordsFormat", quality.unclosedPostponeRecords))
         }
+        if !quality.diagnosticSessionIDs.isEmpty {
+            messages.append(localizedFormat("statsQualityDiagnosticSessionsFormat", formatSessionIDs(quality.diagnosticSessionIDs)))
+        }
 
         return messages
+    }
+
+    private func formatSessionIDs(_ ids: [Int64]) -> String {
+        let maxVisibleIDs = 8
+        let visibleIDs = ids.prefix(maxVisibleIDs).map { "#\($0)" }.joined(separator: ", ")
+        if ids.count > maxVisibleIDs {
+            return "\(visibleIDs), ..."
+        }
+        return visibleIDs
     }
 
     private func localized(_ key: String) -> String {

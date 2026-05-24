@@ -1,7 +1,7 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.7.2
-> **最后更新**: 2026-05-23
+> **文档版本**: v1.7.3
+> **最后更新**: 2026-05-24
 > **维护者**: Javen Fang (@javenfang)
 
 ---
@@ -132,6 +132,7 @@ Sources/TwentyGuard/
 - ⭐ v1.7.0 新增：健康统计改为保护遵守视角，长期统计 App 退出、临时禁用和夜间破例，并提供月度切换视图
 - ⭐ v1.7.1 调整：统计窗口顶部拆分「概览 / 月度」tab，月度切换只刷新月度页内容
 - ⭐ v1.7.2 修复：推迟休息统计记录到当前未完成休息所属的 work session，而不是只查 active work session
+- ⭐ v1.7.3 修复：推迟到期会关闭 active postpone，完成欠下休息会完成同一 break opportunity；新工作周期会中断未闭合 break/postpone，数据质量会显示异常 session ID
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -204,6 +205,8 @@ graph LR
 - `startWorkSession(duration:)` - 开始工作会话
 - `startBreakSession(duration:)` - 开始休息会话
 - `recordPostpone(minutes:)` - 记录推迟事件
+- 推迟到期重新进入休息时，会关闭 active postpone；完成休息时，会把同一 work session 的 `break_info` 标记为 completed
+- 新 work session 开始前会中断遗留的 active break/postpone，避免历史 active 记录继续污染数据质量
 - `recordNightOverrideRequested(...)` / `recordNightOverrideGranted(...)` - 记录夜间破例事件
 - `getTodayStats()` - 获取今日统计
 
@@ -619,7 +622,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.7.2</string>
+<string>1.7.3</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -650,8 +653,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.7.2 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.7.2.dmg`，再更新本节发布验证结果。
+v1.7.3 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.7.3.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -804,18 +807,31 @@ log show --predicate 'subsystem == "com.apple.power"' --last 1h
 # 打开数据库
 sqlite3 ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stats.db
 
-# 查看今日统计
-SELECT * FROM daily_stats WHERE date = date('now');
+# 查看今日会话
+SELECT id, datetime(start_time, 'unixepoch', 'localtime'), actual_work_duration, postpone_count, break_completed
+FROM sessions
+WHERE date(start_time, 'unixepoch', 'localtime') = date('now', 'localtime')
+ORDER BY start_time DESC;
 
 # 查看活跃会话
 SELECT * FROM sessions WHERE status = 'active';
 
 # 查看最近10次推迟
-SELECT start_time, postpone_1min, postpone_2min, postpone_5min
+SELECT id, datetime(start_time, 'unixepoch', 'localtime'), postpone_count, postpone_total_duration, postpones
 FROM sessions
 WHERE postpone_count > 0
 ORDER BY start_time DESC
 LIMIT 10;
+
+# 定位未闭合休息或推迟记录
+SELECT id, datetime(start_time, 'unixepoch', 'localtime'), break_info, postpones
+FROM sessions
+WHERE json_extract(break_info, '$.status') = 'active'
+   OR EXISTS (
+      SELECT 1 FROM json_each(COALESCE(NULLIF(postpones, ''), '[]'))
+      WHERE json_extract(value, '$.status') = 'active'
+         OR json_extract(value, '$.end_time') IS NULL
+   );
 ```
 
 ### 10.4 代码修改检查清单
@@ -883,6 +899,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.7.0 | 2026-05-23 | 健康统计重构为保护遵守视角；新增 `stats_events` 长期记录 App 退出、临时禁用和夜间破例；新增月度切换、日历状态、选中日期明细和例外标记 |
 | v1.7.1 | 2026-05-23 | 统计窗口拆分为「概览 / 月度」顶部 tab；月度页独立承载日历和日期明细；月份切换不再重建默认概览页 |
 | v1.7.2 | 2026-05-23 | 修复推迟统计落库目标错误：break 已开始后 work session 已完成，推迟现在优先挂到当前未完成 break 所属会话；新增 app 层 SQLite 回归测试 |
+| v1.7.3 | 2026-05-24 | 修复 break/postpone 生命周期闭合：推迟恢复休息时关闭 active postpone，完成欠下休息时完成同一 break opportunity，新工作周期中断遗留 active 记录；数据质量隐藏无害启动碎片并显示异常 session ID |
 
 ### B. 相关文档
 
@@ -898,5 +915,5 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 
 ---
 
-**最后更新**: 2026-05-23
-**文档版本**: v1.7.2
+**最后更新**: 2026-05-24
+**文档版本**: v1.7.3

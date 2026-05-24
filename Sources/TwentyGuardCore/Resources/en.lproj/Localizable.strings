@@ -124,6 +124,7 @@
 "statsActiveBreakRecordsFormat" = "Found %d unfinished break records; they are not counted as completed breaks.";
 "statsInterruptedBreakRecordsFormat" = "Found %d interrupted break records.";
 "statsUnclosedPostponeRecordsFormat" = "Found %d postpone records without an end marker; they still count as postpones.";
+"statsQualityDiagnosticSessionsFormat" = "Located affected sessions: %@.";
 "verdictNoDataTitle" = "No Records";
 "verdictNoDataReason" = "No valid work sessions today yet";
 "verdictLongWorkTitle" = "Worked Too Long";
