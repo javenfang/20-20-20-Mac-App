@@ -22,6 +22,32 @@ final class StatsDatabasePostponeTests: XCTestCase {
         XCTAssertEqual(records[0].startTime.timeIntervalSince1970, workStart.timeIntervalSince1970, accuracy: 0.001)
     }
 
+    func testRestoredWorkSessionReuseEmitsDebugLog() throws {
+        let databaseURL = temporaryDirectory().appendingPathComponent("stats.db")
+        var debugEvents: [(action: String, context: [String: String])] = []
+        let database = StatsDatabase(
+            databaseURL: databaseURL,
+            registersForAppTermination: false,
+            debugLogger: { action, context in
+                debugEvents.append((action, context))
+            }
+        )
+        defer { database.closeForTesting() }
+
+        let workStart = Date().addingTimeInterval(-120)
+        XCTAssertEqual(database.startWorkSession(plannedDuration: 1_800, startTime: workStart), 1)
+        database.waitForIdleForTesting()
+
+        XCTAssertEqual(database.startWorkSession(plannedDuration: 1_800, startTime: workStart), 1)
+        database.waitForIdleForTesting()
+
+        XCTAssertTrue(debugEvents.contains { event in
+            event.action == "restore_reused_active_work_session" &&
+                event.context["session_id"] == "1" &&
+                event.context["planned_duration"] == "1800"
+        })
+    }
+
     func testPostponeDuringActiveBreakAttachesToBreakSession() throws {
         let databaseURL = temporaryDirectory().appendingPathComponent("stats.db")
         let database = StatsDatabase(databaseURL: databaseURL, registersForAppTermination: false)

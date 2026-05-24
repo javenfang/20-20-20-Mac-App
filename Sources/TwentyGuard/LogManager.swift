@@ -36,6 +36,7 @@ struct LogEvent: Codable {
         case modeChanged = "mode_changed"
         case timerReset = "timer_reset"
         case stateSnapshot = "state_snapshot"
+        case sessionDebug = "session_debug"
         case nightOverrideRequested = "night_override_requested"
         case nightOverrideGranted = "night_override_granted"
         case nightOverrideCancelled = "night_override_cancelled"
@@ -377,7 +378,13 @@ extension LogManager {
     func logTimerReset(reason: String) {
         logEvent(.timerReset, context: ["reason": reason])
     }
-    
+
+    func logSessionDebug(action: String, context: [String: String] = [:]) {
+        var debugContext = context
+        debugContext["action"] = action
+        logEvent(.sessionDebug, context: debugContext)
+    }
+
     func logStateSnapshot(
         workStartTime: Date?,
         breakStartTime: Date?,

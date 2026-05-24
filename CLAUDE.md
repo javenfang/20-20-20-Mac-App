@@ -247,6 +247,12 @@ JSONL is the source of truth for event records; database is the query optimizati
    ```
    Should see: `work_started`, `break_started`, `work_completed`, `break_completed` events
 
+   For session lifecycle bugs, inspect `session_debug` actions as well:
+   ```bash
+   cat ~/Library/Application\ Support/com.javengroup.twentyguard/logs/$(date +%Y-%m-%d).jsonl \
+     | jq 'select(.eventType == "session_debug")'
+   ```
+
 2. **Check sessions Table** (is data written to database):
    ```bash
    sqlite3 ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stats.db \
@@ -283,10 +289,10 @@ JSONL is the source of truth for event records; database is the query optimizati
 
 - ✅ **Bundle ID**: `com.javengroup.twentyguard`
 - ✅ **App Name**: "TwentyGuard"
-- ✅ **Version**: 1.7.5
+- ✅ **Version**: 1.7.6
 - ✅ **Minimum macOS**: 12.0
 - ⚠️ **Development Signing**: `make build-app` uses ad-hoc signing for local install/test only
-- ⚠️ **Public Direct Download**: latest verified public DMG is v1.5.3; v1.7.5 must run `make release` before upload
+- ⚠️ **Public Direct Download**: latest verified public DMG is v1.5.3; v1.7.6 must run `make release` before upload
 - ✅ **Size**: ~1.3MB (extremely lightweight)
 
 For direct distribution outside the Mac App Store, Apple requires the app to be

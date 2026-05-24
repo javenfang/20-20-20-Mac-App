@@ -7,8 +7,17 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.7.5",
+  "current_version": "1.7.6",
   "versions": [
+    {
+      "version": "1.7.6",
+      "date": "2026-05-24",
+      "changes": [
+        "Added structured session_debug JSONL events for session restoration, system pause/resume, work-session reuse, break attachment, and break completion",
+        "Allowed StatsDatabase to inject a debug logger so tests can verify diagnostic events without writing user logs",
+        "Reset local TwentyGuard runtime data before reinstalling so new statistics start from a clean baseline"
+      ]
+    },
     {
       "version": "1.7.5",
       "date": "2026-05-24",

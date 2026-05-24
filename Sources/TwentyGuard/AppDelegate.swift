@@ -220,13 +220,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func restoreSessionIfNeeded() -> Bool {
         logManager.logEvent(.appLaunched, context: ["debug": "restore_start"])
+        logSessionDebug("restore_session_started")
 
         if restoreTemporaryDisableIfNeeded() {
+            logSessionDebug("restore_temporary_disable_active")
             return true
         }
 
         if let savedState = eventRecorder.restoreSessionState() {
             logManager.logEvent(.appLaunched, context: ["debug": "decode_success", "workStartTime": savedState.workStartTime?.description ?? "nil"])
+            logSessionDebug("restore_session_decoded", context: [
+                "work_start_time": debugTimestamp(savedState.workStartTime),
+                "break_start_time": debugTimestamp(savedState.breakStartTime),
+                "postpone_start_time": debugTimestamp(savedState.postponeStartTime),
+                "postpone_duration": "\(Int(savedState.postponeDuration))",
+                "paused_by_system_event": "\(savedState.pausedBySystemEvent)"
+            ])
             
             // 重要：不恢复用户配置（isCustomMode, currentWorkDuration, currentBreakDuration）
             // 这些应该始终来自UserDefaults，通过loadSettings()获取
@@ -237,6 +246,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             if savedState.pausedBySystemEvent {
                 logManager.logEvent(.appLaunched, context: ["debug": "session_rejected", "reason": "paused_by_system_event"])
+                logSessionDebug("restore_session_rejected", context: [
+                    "reason": "paused_by_system_event",
+                    "work_start_time": debugTimestamp(savedState.workStartTime),
+                    "break_start_time": debugTimestamp(savedState.breakStartTime)
+                ])
                 logManager.logTimerReset(reason: "paused_by_system_event")
                 return false
             }
@@ -244,6 +258,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             switch SessionRecoveryPolicy().decision(for: savedState, now: Date()) {
             case .continuePostpone(let startTime, let duration, let savedTotalPostponedTime):
                 logManager.logEvent(.appLaunched, context: ["debug": "session_valid", "restore": "active_postpone"])
+                logSessionDebug("restore_active_postpone", context: [
+                    "postpone_start_time": debugTimestamp(startTime),
+                    "postpone_duration": "\(Int(duration))",
+                    "total_postponed_time": "\(Int(savedTotalPostponedTime))"
+                ])
                 workSessionStartTime = nil
                 breakSessionStartTime = nil
                 postponeStartTime = startTime
@@ -255,6 +274,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             case .startBreakAfterExpiredPostpone(let savedTotalPostponedTime):
                 logManager.logEvent(.appLaunched, context: ["debug": "session_valid", "restore": "expired_postpone"])
+                logSessionDebug("restore_expired_postpone_to_break", context: [
+                    "total_postponed_time": "\(Int(savedTotalPostponedTime))"
+                ])
                 workSessionStartTime = nil
                 breakSessionStartTime = nil
                 postponeStartTime = nil
@@ -272,10 +294,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if !savedState.shouldRestoreAfterSystemEvent() {
                 let reason = savedState.pausedBySystemEvent ? "paused_by_system_event" : "session_too_old"
                 logManager.logEvent(.appLaunched, context: ["debug": "session_rejected", "reason": reason])
+                logSessionDebug("restore_session_rejected", context: [
+                    "reason": reason,
+                    "seconds_since_last_save": "\(Int(timeSinceLastSave))"
+                ])
                 logManager.logTimerReset(reason: reason)
                 return false
             } else {
                 logManager.logEvent(.appLaunched, context: ["debug": "session_valid"])
+                logSessionDebug("restore_session_valid", context: [
+                    "seconds_since_last_save": "\(Int(timeSinceLastSave))"
+                ])
             }
             
             // 恢复工作会话
@@ -288,17 +317,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // 继续工作会话
                     workSessionStartTime = workStart
                     // 在数据库中记录恢复的会话，使用原始开始时间
+                    logSessionDebug("restore_active_work_session", context: [
+                        "work_start_time": debugTimestamp(workStart),
+                        "work_elapsed": "\(Int(workElapsed))",
+                        "planned_work_duration": "\(plannedWorkDuration)"
+                    ])
                     eventRecorder.startWorkSession(duration: plannedWorkDuration, startTime: workStart)
                     print("🔄 恢复工作会话，已用时 \(Int(workElapsed))秒，剩余 \(Int(workTimeRemaining))秒")
-                    
+
                     if workElapsed >= TimeInterval(plannedWorkDuration) {
                         // 工作时间已到，立即进入休息
+                        logSessionDebug("restored_work_session_due_for_break", context: [
+                            "work_elapsed": "\(Int(workElapsed))",
+                            "planned_work_duration": "\(plannedWorkDuration)"
+                        ])
                         logManager.logWorkCompleted(duration: workElapsed)
                         showBreakOverlay()
                     }
                     return true
                 } else {
                     // 工作时间过长，重置
+                    logSessionDebug("restore_work_session_overtime", context: [
+                        "work_elapsed": "\(Int(workElapsed))",
+                        "planned_work_duration": "\(plannedWorkDuration)"
+                    ])
                     logManager.logWorkPaused(duration: workElapsed, reason: "session_overtime")
                     logManager.logTimerReset(reason: "work_session_overtime")
                     return false
@@ -313,11 +355,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if breakElapsed < maxBreakTime {
                     // 继续休息会话
                     breakSessionStartTime = breakStart
+                    logSessionDebug("restore_active_break_session", context: [
+                        "break_start_time": debugTimestamp(breakStart),
+                        "break_elapsed": "\(Int(breakElapsed))",
+                        "planned_break_duration": "\(currentBreakDuration)"
+                    ])
                     print("🔄 恢复休息会话，已用时 \(Int(breakElapsed))秒，剩余 \(Int(breakTimeRemaining))秒")
                     showBreakOverlay()
                     return true
                 } else {
                     // 休息时间过长，自动完成休息
+                    logSessionDebug("restore_break_session_overtime_completed", context: [
+                        "break_elapsed": "\(Int(breakElapsed))",
+                        "planned_break_duration": "\(currentBreakDuration)"
+                    ])
                     logManager.logBreakCompleted(actualDuration: breakElapsed, expectedDuration: currentBreakDuration)
                     eventRecorder.endBreakSession()
                     logManager.logTimerReset(reason: "break_session_overtime")
@@ -328,6 +379,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 没有有效的保存状态，需要开始新会话
         logManager.logEvent(.appLaunched, context: ["debug": "restore_failed", "reason": "no_session_state"])
+        logSessionDebug("restore_session_missing_state")
         return false
     }
     
@@ -1830,6 +1882,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private func logSessionDebug(_ action: String, context: [String: String] = [:]) {
+        logManager.logSessionDebug(action: action, context: context)
+    }
+
+    private func debugTimestamp(_ date: Date?) -> String {
+        date.map { String(format: "%.3f", $0.timeIntervalSince1970) } ?? "nil"
+    }
+
     private func updateTemporaryDisableMenuItem() {
         guard temporaryDisableMenuItem != nil else { return }
 
@@ -2259,7 +2319,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func pauseCurrentSession(reason: String) {
         workTimer?.invalidate()
         breakTimer?.invalidate()
-        
+        logSessionDebug("system_pause_current_session", context: [
+            "reason": reason,
+            "work_start_time": debugTimestamp(workSessionStartTime),
+            "break_start_time": debugTimestamp(breakSessionStartTime),
+            "postpone_start_time": debugTimestamp(postponeStartTime),
+            "postpone_duration": "\(Int(postponeDuration))",
+            "total_postponed_time": "\(Int(totalPostponedTime))",
+            "overlay_count": "\(breakOverlays.count)"
+        ])
+
         // 保存当前状态，标记为被系统事件暂停
         logManager.saveSessionState(
             workStartTime: workSessionStartTime,
@@ -2276,6 +2345,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func evaluateAndResumeSession(reason: String) {
         // 首先检查并清理任何残留的休息窗口
+        logSessionDebug("system_resume_evaluate", context: [
+            "reason": reason,
+            "work_start_time": debugTimestamp(workSessionStartTime),
+            "break_start_time": debugTimestamp(breakSessionStartTime),
+            "postpone_start_time": debugTimestamp(postponeStartTime),
+            "postpone_duration": "\(Int(postponeDuration))",
+            "overlay_count": "\(breakOverlays.count)"
+        ])
+
         if !breakOverlays.isEmpty {
             print("⚠️ 检测到系统唤醒后有 \(breakOverlays.count) 个残留休息窗口，先清理")
             cleanupBreakOverlays()
@@ -2303,6 +2381,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 重置为新的工作会话
         workSessionStartTime = nil
         breakSessionStartTime = nil
+        logSessionDebug("system_resume_start_fresh_work", context: [
+            "reason": reason
+        ])
         restartWorkTimer()
     }
 }

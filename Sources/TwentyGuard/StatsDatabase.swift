@@ -98,12 +98,15 @@ enum DatabaseError: Error {
 // MARK: - StatsDatabase
 
 class StatsDatabase {
-    static let shared = StatsDatabase()
+    static let shared = StatsDatabase(debugLogger: { action, context in
+        LogManager.shared.logSessionDebug(action: action, context: context)
+    })
 
     private var db: OpaquePointer?
     private let dbQueue = DispatchQueue(label: "com.javengroup.twentyguard.database", qos: .userInitiated)
     private let fileManager = FileManager.default
     private let databaseURLOverride: URL?
+    private let debugLogger: ((String, [String: String]) -> Void)?
     private var isValid = false
 
     private var databaseURL: URL {
@@ -117,8 +120,13 @@ class StatsDatabase {
         return paths.databaseURL
     }
 
-    init(databaseURL: URL? = nil, registersForAppTermination: Bool = true) {
+    init(
+        databaseURL: URL? = nil,
+        registersForAppTermination: Bool = true,
+        debugLogger: ((String, [String: String]) -> Void)? = nil
+    ) {
         self.databaseURLOverride = databaseURL
+        self.debugLogger = debugLogger
         setupDatabase()
         if registersForAppTermination {
             registerForAppTermination()
@@ -491,6 +499,10 @@ class StatsDatabase {
         }
     }
 
+    private func logDebug(_ action: String, context: [String: String] = [:]) {
+        debugLogger?(action, context)
+    }
+
     // MARK: - Core Session Management
 
     func startWorkSession(plannedDuration: Int, startTime: Date? = nil, completion: @escaping (Result<Int64, Error>) -> Void) {
@@ -502,6 +514,12 @@ class StatsDatabase {
 
             do {
                 let sessionId = try self.withTransaction {
+                    self.logDebug("start_work_session_requested", context: [
+                        "planned_duration": "\(plannedDuration)",
+                        "has_restore_start_time": startTime == nil ? "false" : "true",
+                        "restore_start_time": startTime.map { String(format: "%.3f", $0.timeIntervalSince1970) } ?? "nil"
+                    ])
+
                     if let startTime,
                        let existingSessionId = try self.reuseActiveWorkSessionInternal(
                            startTime: startTime,
@@ -536,10 +554,19 @@ class StatsDatabase {
 
                     let sessionId = sqlite3_last_insert_rowid(self.db)
                     print("📊 Started work session #\(sessionId) (v1.2.0)")
+                    self.logDebug("start_work_session_inserted", context: [
+                        "session_id": "\(sessionId)",
+                        "planned_duration": "\(plannedDuration)",
+                        "start_time": String(format: "%.3f", sessionStartTime)
+                    ])
                     return sessionId
                 }
                 completion(.success(sessionId))
             } catch {
+                self.logDebug("start_work_session_failed", context: [
+                    "planned_duration": "\(plannedDuration)",
+                    "error": String(describing: error)
+                ])
                 completion(.failure(error))
             }
         }
@@ -615,6 +642,12 @@ class StatsDatabase {
             throw DatabaseError.queryFailed("Failed to update reused active work session")
         }
 
+        logDebug("restore_reused_active_work_session", context: [
+            "session_id": "\(sessionId)",
+            "planned_duration": "\(plannedDuration)",
+            "restore_start_time": String(format: "%.3f", timestamp)
+        ])
+
         return sessionId
     }
 
@@ -629,6 +662,9 @@ class StatsDatabase {
                     // completed the work session before the overlay is shown.
                     guard let sessionId = try self.getLatestWorkSessionForBreakInternal() else {
                         print("⚠️ No work session available to start break")
+                        self.logDebug("start_break_no_target", context: [
+                            "planned_duration": "\(plannedDuration)"
+                        ])
                         return
                     }
 
@@ -672,9 +708,18 @@ class StatsDatabase {
                     }
 
                     print("📊 Started break for session #\(sessionId) (v1.2.0)")
+                    self.logDebug("start_break_attached", context: [
+                        "session_id": "\(sessionId)",
+                        "planned_duration": "\(plannedDuration)",
+                        "start_time": String(format: "%.3f", now)
+                    ])
                 }
             } catch {
                 print("❌ Failed to start break: \(error)")
+                self.logDebug("start_break_failed", context: [
+                    "planned_duration": "\(plannedDuration)",
+                    "error": String(describing: error)
+                ])
             }
         }
     }
@@ -702,6 +747,7 @@ class StatsDatabase {
                     guard sqlite3_prepare_v2(self.db, findSQL, -1, &findStmt, nil) == SQLITE_OK,
                           sqlite3_step(findStmt) == SQLITE_ROW else {
                         print("⚠️ No session with incomplete break found")
+                        self.logDebug("complete_break_no_target")
                         return
                     }
 
@@ -768,9 +814,17 @@ class StatsDatabase {
                     }
 
                     print("📊 Completed break for session #\(sessionId) (v1.2.0)")
+                    self.logDebug("complete_break_marked", context: [
+                        "session_id": "\(sessionId)",
+                        "actual_duration": "\(breakInfo.actual_duration ?? 0)",
+                        "end_time": String(format: "%.3f", now)
+                    ])
                 }
             } catch {
                 print("❌ Failed to complete break: \(error)")
+                self.logDebug("complete_break_failed", context: [
+                    "error": String(describing: error)
+                ])
             }
         }
     }
@@ -1091,6 +1145,10 @@ class StatsDatabase {
         let changes = sqlite3_changes(db)
         if changes > 0 {
             print("📊 Ended \(changes) active session(s) (v1.2.0)")
+            logDebug("active_work_sessions_closed", context: [
+                "rows_changed": "\(changes)",
+                "end_time": String(format: "%.3f", now)
+            ])
         }
     }
 
@@ -1120,6 +1178,10 @@ class StatsDatabase {
 
         if sqlite3_changes(db) > 0 {
             print("📊 Ended work session #\(sessionId) before break")
+            logDebug("work_session_closed_for_break", context: [
+                "session_id": "\(sessionId)",
+                "end_time": String(format: "%.3f", endTime)
+            ])
         }
     }
 

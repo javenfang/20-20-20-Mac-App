@@ -1,6 +1,6 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.7.5
+> **文档版本**: v1.7.6
 > **最后更新**: 2026-05-24
 > **维护者**: Javen Fang (@javenfang)
 
@@ -135,6 +135,7 @@ Sources/TwentyGuard/
 - ⭐ v1.7.3 修复：推迟到期会关闭 active postpone，完成欠下休息会完成同一 break opportunity；新工作周期会中断未闭合 break/postpone，数据质量会显示异常 session ID
 - ⭐ v1.7.4 调整：统计窗口直接处理 ⌘W 关闭，右下角 Close 按钮配置 ⌘C key equivalent
 - ⭐ v1.7.5 修复：恢复同一 work session 时复用 active row，统计层忽略同开始时间恢复副本，避免不可能的超长工作污染完成率
+- ⭐ v1.7.6 诊断增强：新增 `session_debug` JSONL 事件，串联 AppDelegate 会话恢复、系统事件和 StatsDatabase 会话闭合动作
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -520,6 +521,10 @@ graph TB
 
 v1.7.0 后，`stats_events` 是 App 退出、临时禁用和夜间破例的长期统计源。
 JSONL 仍用于事件审计、调试和崩溃恢复，但月度统计不依赖 30 天 JSONL 保留期。
+v1.7.6 起，`session_debug` 记录关键会话诊断动作，常见 `action` 包括
+`restore_session_decoded`、`restore_active_work_session`、`system_pause_current_session`、
+`system_resume_evaluate`、`restore_reused_active_work_session`、`start_break_attached`
+和 `complete_break_marked`。
 
 **数据清理**:
 - SQLite: 应用启动时清理 `sessions` 和 `stats_events`
@@ -624,7 +629,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.7.5</string>
+<string>1.7.6</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -655,8 +660,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.7.5 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.7.5.dmg`，再更新本节发布验证结果。
+v1.7.6 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.7.6.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -904,6 +909,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.7.3 | 2026-05-24 | 修复 break/postpone 生命周期闭合：推迟恢复休息时关闭 active postpone，完成欠下休息时完成同一 break opportunity，新工作周期中断遗留 active 记录；数据质量隐藏无害启动碎片并显示异常 session ID |
 | v1.7.4 | 2026-05-24 | 统计窗口支持 ⌘W 关闭；右下角 Close 按钮配置 ⌘C key equivalent；新增 AppKit 快捷键回归测试 |
 | v1.7.5 | 2026-05-24 | 恢复同一工作开始时间时复用 active session row；统计引擎按同一开始时间去重恢复副本，优先保留带休息/推迟证据的记录；新增 SQLite 与 StatsEngine 回归测试 |
+| v1.7.6 | 2026-05-24 | 新增 `session_debug` JSONL 诊断事件；StatsDatabase 支持注入 debug logger；会话恢复、系统暂停/唤醒、工作会话复用、休息挂载和休息完成均带结构化定位字段；本机旧运行数据已清理后重新开始 |
 
 ### B. 相关文档
 
@@ -920,4 +926,4 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 ---
 
 **最后更新**: 2026-05-24
-**文档版本**: v1.7.5
+**文档版本**: v1.7.6

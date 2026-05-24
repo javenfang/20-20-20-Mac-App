@@ -1,6 +1,6 @@
 # TwentyGuard - 功能需求文档
 
-> **文档版本**: v1.7.5
+> **文档版本**: v1.7.6
 > **最后更新**: 2026-05-24
 > **维护者**: Javen Fang (@javenfang)
 
@@ -253,6 +253,7 @@ TwentyGuard 是一款原生 macOS 菜单栏应用，通过实施 20-20-20 规则
 
 - **JSONL日志**（调试用）
   - 所有事件的时间戳记录
+  - `session_debug` 记录会话恢复、系统暂停/唤醒、工作会话复用、休息挂载和休息完成等诊断动作
   - 按日期分文件存储
   - 保留30天
   - 位置：~/Library/Application Support/com.javengroup.twentyguard/logs/
@@ -399,7 +400,7 @@ TwentyGuard 是一款原生 macOS 菜单栏应用，通过实施 20-20-20 规则
 ### 8.1 应用信息
 - **Bundle ID**: com.javengroup.twentyguard
 - **应用名称**: TwentyGuard
-- **版本**: 1.7.5
+- **版本**: 1.7.6
 - **大小**: 约1.3MB
 
 ### 8.2 分发方式
@@ -416,8 +417,8 @@ v1.5.3 已完成直接分发验证：`TwentyGuard-v1.5.3.dmg` 使用
 `TwentyGuard.app` 和指向 `/Applications` 的拖拽入口，app bundle 结构由
 `scripts/verify-app-bundle.sh` 和 `scripts/verify-dmg.sh` 自动校验。
 
-v1.7.5 当前为功能实现版本；公开分发前仍需重新执行 `make release`，生成并验证
-`TwentyGuard-v1.7.5.dmg`。
+v1.7.6 当前为功能实现版本；公开分发前仍需重新执行 `make release`，生成并验证
+`TwentyGuard-v1.7.6.dmg`。
 
 ---
 
@@ -442,6 +443,7 @@ v1.7.5 当前为功能实现版本；公开分发前仍需重新执行 `make rel
 | v1.7.3 | 2026-05-24 | 修复休息和推迟记录生命周期闭合：推迟到期后关闭推迟记录，完成欠下休息后完成同一休息机会；新工作周期会中断未闭合记录；数据质量不再展示无害启动碎片，并显示异常 session ID 定位 |
 | v1.7.4 | 2026-05-24 | 统计窗口支持 macOS 常用关闭快捷键：⌘W 关闭窗口，右下角 Close 按钮支持 ⌘C；新增 AppKit 快捷键回归测试 |
 | v1.7.5 | 2026-05-24 | 修复恢复同一工作开始时间时重复插入 session 的问题；统计引擎忽略同一开始时间的恢复副本，避免出现不可能的超长连续工作并误降休息完成率；补充 SQLite 和统计引擎回归测试 |
+| v1.7.6 | 2026-05-24 | 清理本机旧运行数据后重新开始统计；新增 `session_debug` 结构化 JSONL 诊断事件，覆盖会话恢复、系统暂停/唤醒、工作会话复用、休息挂载和休息完成；补充日志事件与数据库 debug logger 回归测试 |
 
 ---
 
