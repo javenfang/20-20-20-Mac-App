@@ -7,8 +7,17 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.7.6",
+  "current_version": "1.7.7",
   "versions": [
+    {
+      "version": "1.7.7",
+      "date": "2026-05-24",
+      "changes": [
+        "Fixed completed breaks always starting a fresh work session even when stale postpone state is still present",
+        "Added a SessionState regression test so completed breaks clear postpone state and reset the work start time",
+        "Added session_debug evidence when a completed break starts a fresh work session and clears stale postpone state"
+      ]
+    },
     {
       "version": "1.7.6",
       "date": "2026-05-24",

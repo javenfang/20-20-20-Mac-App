@@ -1437,18 +1437,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    private func startWorkTimer() {
+    private func startWorkTimer(forceFreshSession: Bool = false) {
         if applyNightRestrictionState(reason: "start_work_timer") {
             return
         }
 
-        // 如果在推迟期间，不要重置工作会话
-        if !isPostponeActive {
-            // 如果还没有开始工作会话，则开始一个新的
-            if workSessionStartTime == nil {
-                workSessionStartTime = Date()
-                eventRecorder.recordTimerReset(reason: "fresh_start")
-                eventRecorder.startWorkSession(duration: effectiveWorkDuration)
+        if forceFreshSession {
+            let now = Date()
+            let hadPostponeState = postponeStartTime != nil || postponeDuration > 0 || totalPostponedTime > 0
+            let nextState = SessionState(
+                workStartTime: workSessionStartTime,
+                breakStartTime: breakSessionStartTime,
+                postponeStartTime: postponeStartTime,
+                postponeDuration: postponeDuration,
+                totalPostponedTime: totalPostponedTime,
+                currentWorkDuration: currentWorkDuration,
+                currentBreakDuration: currentBreakDuration,
+                isCustomMode: isCustomMode,
+                lastSaved: now,
+                pausedBySystemEvent: false
+            ).completedBreak(now: now)
+
+            workSessionStartTime = nextState.workStartTime
+            breakSessionStartTime = nextState.breakStartTime
+            postponeStartTime = nextState.postponeStartTime
+            postponeDuration = nextState.postponeDuration
+            totalPostponedTime = nextState.totalPostponedTime
+
+            logSessionDebug("break_completed_started_fresh_work_session", context: [
+                "work_start_time": debugTimestamp(workSessionStartTime),
+                "cleared_postpone_state": "\(hadPostponeState)"
+            ])
+            eventRecorder.recordTimerReset(reason: "fresh_start")
+            eventRecorder.startWorkSession(duration: effectiveWorkDuration)
+        } else {
+            // 如果在推迟期间，不要重置工作会话
+            if !isPostponeActive {
+                // 如果还没有开始工作会话，则开始一个新的
+                if workSessionStartTime == nil {
+                    workSessionStartTime = Date()
+                    eventRecorder.recordTimerReset(reason: "fresh_start")
+                    eventRecorder.startWorkSession(duration: effectiveWorkDuration)
+                }
             }
         }
         
@@ -2163,9 +2193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 记录休息完成到数据库
         eventRecorder.endBreakSession()
 
-        breakSessionStartTime = nil
-        totalPostponedTime = 0  // 完成休息后重置累计推迟时间
-        startWorkTimer()
+        startWorkTimer(forceFreshSession: true)
         
         // 清除标志
         isCompletingBreakSession = false

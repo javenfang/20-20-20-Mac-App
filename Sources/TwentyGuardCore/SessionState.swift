@@ -49,6 +49,21 @@ public struct SessionState: Codable, Equatable, Sendable {
         return max(0, postponeDuration - now.timeIntervalSince(postponeStartTime))
     }
 
+    public func completedBreak(now: Date) -> SessionState {
+        SessionState(
+            workStartTime: now,
+            breakStartTime: nil,
+            postponeStartTime: nil,
+            postponeDuration: 0,
+            totalPostponedTime: 0,
+            currentWorkDuration: currentWorkDuration,
+            currentBreakDuration: currentBreakDuration,
+            isCustomMode: isCustomMode,
+            lastSaved: now,
+            pausedBySystemEvent: false
+        )
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.workStartTime = try container.decodeIfPresent(Date.self, forKey: .workStartTime)

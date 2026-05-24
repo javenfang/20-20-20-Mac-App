@@ -1,6 +1,6 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.7.6
+> **文档版本**: v1.7.7
 > **最后更新**: 2026-05-24
 > **维护者**: Javen Fang (@javenfang)
 
@@ -136,6 +136,7 @@ Sources/TwentyGuard/
 - ⭐ v1.7.4 调整：统计窗口直接处理 ⌘W 关闭，右下角 Close 按钮配置 ⌘C key equivalent
 - ⭐ v1.7.5 修复：恢复同一 work session 时复用 active row，统计层忽略同开始时间恢复副本，避免不可能的超长工作污染完成率
 - ⭐ v1.7.6 诊断增强：新增 `session_debug` JSONL 事件，串联 AppDelegate 会话恢复、系统事件和 StatsDatabase 会话闭合动作
+- ⭐ v1.7.7 修复：休息完成后强制开启新的 work session，并清理残留 postpone 状态，避免旧周期几分钟后再次触发休息
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -524,7 +525,7 @@ JSONL 仍用于事件审计、调试和崩溃恢复，但月度统计不依赖 3
 v1.7.6 起，`session_debug` 记录关键会话诊断动作，常见 `action` 包括
 `restore_session_decoded`、`restore_active_work_session`、`system_pause_current_session`、
 `system_resume_evaluate`、`restore_reused_active_work_session`、`start_break_attached`
-和 `complete_break_marked`。
+、`complete_break_marked` 和 `break_completed_started_fresh_work_session`。
 
 **数据清理**:
 - SQLite: 应用启动时清理 `sessions` 和 `stats_events`
@@ -629,7 +630,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.7.6</string>
+<string>1.7.7</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -660,8 +661,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.7.6 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.7.6.dmg`，再更新本节发布验证结果。
+v1.7.7 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.7.7.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -910,6 +911,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.7.4 | 2026-05-24 | 统计窗口支持 ⌘W 关闭；右下角 Close 按钮配置 ⌘C key equivalent；新增 AppKit 快捷键回归测试 |
 | v1.7.5 | 2026-05-24 | 恢复同一工作开始时间时复用 active session row；统计引擎按同一开始时间去重恢复副本，优先保留带休息/推迟证据的记录；新增 SQLite 与 StatsEngine 回归测试 |
 | v1.7.6 | 2026-05-24 | 新增 `session_debug` JSONL 诊断事件；StatsDatabase 支持注入 debug logger；会话恢复、系统暂停/唤醒、工作会话复用、休息挂载和休息完成均带结构化定位字段；本机旧运行数据已清理后重新开始 |
+| v1.7.7 | 2026-05-24 | 休息完成后强制进入新的 work session，并清理残留 postpone 状态；避免主动休息完成后沿用旧周期导致几分钟后再次休息；新增 SessionState 回归测试和对应 `session_debug` action |
 
 ### B. 相关文档
 
@@ -926,4 +928,4 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 ---
 
 **最后更新**: 2026-05-24
-**文档版本**: v1.7.6
+**文档版本**: v1.7.7
