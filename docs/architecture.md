@@ -1,6 +1,6 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.7.7
+> **文档版本**: v1.7.8
 > **最后更新**: 2026-05-24
 > **维护者**: Javen Fang (@javenfang)
 
@@ -137,6 +137,7 @@ Sources/TwentyGuard/
 - ⭐ v1.7.5 修复：恢复同一 work session 时复用 active row，统计层忽略同开始时间恢复副本，避免不可能的超长工作污染完成率
 - ⭐ v1.7.6 诊断增强：新增 `session_debug` JSONL 事件，串联 AppDelegate 会话恢复、系统事件和 StatsDatabase 会话闭合动作
 - ⭐ v1.7.7 修复：休息完成后强制开启新的 work session，并清理残留 postpone 状态，避免旧周期几分钟后再次触发休息
+- ⭐ v1.7.8 修复：系统暂停时立即闭合 active session 并保留 paused 状态；统计排除超过计划时长、推迟和宽限上限的异常长 session
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -630,7 +631,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.7.7</string>
+<string>1.7.8</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -661,8 +662,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.7.7 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.7.7.dmg`，再更新本节发布验证结果。
+v1.7.8 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.7.8.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -912,6 +913,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.7.5 | 2026-05-24 | 恢复同一工作开始时间时复用 active session row；统计引擎按同一开始时间去重恢复副本，优先保留带休息/推迟证据的记录；新增 SQLite 与 StatsEngine 回归测试 |
 | v1.7.6 | 2026-05-24 | 新增 `session_debug` JSONL 诊断事件；StatsDatabase 支持注入 debug logger；会话恢复、系统暂停/唤醒、工作会话复用、休息挂载和休息完成均带结构化定位字段；本机旧运行数据已清理后重新开始 |
 | v1.7.7 | 2026-05-24 | 休息完成后强制进入新的 work session，并清理残留 postpone 状态；避免主动休息完成后沿用旧周期导致几分钟后再次休息；新增 SessionState 回归测试和对应 `session_debug` action |
+| v1.7.8 | 2026-05-24 | 系统暂停时立即闭合 active session，清空本地计时状态并持续保存 paused 标记；统计层按计划时长 + 推迟 + 宽限排除异常长 session，避免锁屏/屏保时间污染最长连续工作 |
 
 ### B. 相关文档
 
@@ -928,4 +930,4 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 ---
 
 **最后更新**: 2026-05-24
-**文档版本**: v1.7.7
+**文档版本**: v1.7.8

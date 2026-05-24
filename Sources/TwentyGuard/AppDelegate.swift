@@ -86,6 +86,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Protection flags
     private var isCompletingWorkSession = false
     private var isCompletingBreakSession = false
+    private var isPausedBySystemEvent = false
     
     // MARK: - Computed Properties for Time Calculation
 
@@ -1422,6 +1423,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         postponeStartTime = nil
         postponeDuration = 0
         totalPostponedTime = 0  // 重置累计推迟时间
+        isPausedBySystemEvent = false
 
         updateStatusBarTitle()
         updateMenuTimer()
@@ -1463,6 +1465,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             postponeStartTime = nextState.postponeStartTime
             postponeDuration = nextState.postponeDuration
             totalPostponedTime = nextState.totalPostponedTime
+            isPausedBySystemEvent = false
 
             logSessionDebug("break_completed_started_fresh_work_session", context: [
                 "work_start_time": debugTimestamp(workSessionStartTime),
@@ -1476,6 +1479,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // 如果还没有开始工作会话，则开始一个新的
                 if workSessionStartTime == nil {
                     workSessionStartTime = Date()
+                    isPausedBySystemEvent = false
                     eventRecorder.recordTimerReset(reason: "fresh_start")
                     eventRecorder.startWorkSession(duration: effectiveWorkDuration)
                 }
@@ -1908,7 +1912,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             totalPostponedTime: totalPostponedTime,
             currentWorkDuration: currentWorkDuration,
             currentBreakDuration: currentBreakDuration,
-            isCustomMode: isCustomMode
+            isCustomMode: isCustomMode,
+            pausedBySystemEvent: isPausedBySystemEvent
         )
     }
 
@@ -2346,7 +2351,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func pauseCurrentSession(reason: String) {
         workTimer?.invalidate()
+        workTimer = nil
         breakTimer?.invalidate()
+        breakTimer = nil
         logSessionDebug("system_pause_current_session", context: [
             "reason": reason,
             "work_start_time": debugTimestamp(workSessionStartTime),
@@ -2357,8 +2364,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "overlay_count": "\(breakOverlays.count)"
         ])
 
-        // 保存当前状态，标记为被系统事件暂停
-        logManager.saveSessionState(
+        if let startTime = workSessionStartTime {
+            let elapsed = Date().timeIntervalSince(startTime)
+            logManager.logWorkPaused(duration: elapsed, reason: "system_pause_\(reason)")
+            eventRecorder.endActiveSessionForSystemPause(reason: reason)
+        } else if breakSessionStartTime != nil {
+            eventRecorder.endBreakSession()
+        } else if postponeStartTime != nil {
+            eventRecorder.endActiveSessionForSystemPause(reason: reason)
+        }
+
+        let pausedState = SessionState(
             workStartTime: workSessionStartTime,
             breakStartTime: breakSessionStartTime,
             postponeStartTime: postponeStartTime,
@@ -2367,8 +2383,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             currentWorkDuration: currentWorkDuration,
             currentBreakDuration: currentBreakDuration,
             isCustomMode: isCustomMode,
-            pausedBySystemEvent: true  // 标记为系统事件暂停
-        )
+            lastSaved: Date(),
+            pausedBySystemEvent: false
+        ).pausedForSystemEvent(now: Date())
+
+        workSessionStartTime = pausedState.workStartTime
+        breakSessionStartTime = pausedState.breakStartTime
+        postponeStartTime = pausedState.postponeStartTime
+        postponeDuration = pausedState.postponeDuration
+        totalPostponedTime = pausedState.totalPostponedTime
+        isPausedBySystemEvent = pausedState.pausedBySystemEvent
+        saveCurrentSessionState()
     }
     
     private func evaluateAndResumeSession(reason: String) {

@@ -7,8 +7,17 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.7.7",
+  "current_version": "1.7.8",
   "versions": [
+    {
+      "version": "1.7.8",
+      "date": "2026-05-24",
+      "changes": [
+        "Closed active work sessions immediately when screen lock, screensaver, or display sleep pauses the app so sleep time is not counted as continuous work",
+        "Preserved the paused-by-system-event flag in saved session snapshots until wake starts a fresh work session",
+        "Excluded sessions longer than planned work duration plus postpone time and grace from statistics so impossible long sessions do not pollute health reports"
+      ]
+    },
     {
       "version": "1.7.7",
       "date": "2026-05-24",

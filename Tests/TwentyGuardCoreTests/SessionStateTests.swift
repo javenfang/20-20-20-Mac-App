@@ -99,6 +99,35 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(nextState.pausedBySystemEvent)
     }
 
+    func testSystemPauseClearsActiveTimingAndPersistsPausedFlag() {
+        let pausedAt = date("2026-05-08T08:15:00Z")
+        let state = SessionState(
+            workStartTime: date("2026-05-08T08:00:00Z"),
+            breakStartTime: nil,
+            postponeStartTime: date("2026-05-08T08:10:00Z"),
+            postponeDuration: 5 * 60,
+            totalPostponedTime: 5 * 60,
+            currentWorkDuration: 30 * 60,
+            currentBreakDuration: 3 * 60,
+            isCustomMode: true,
+            lastSaved: date("2026-05-08T08:14:55Z"),
+            pausedBySystemEvent: false
+        )
+
+        let pausedState = state.pausedForSystemEvent(now: pausedAt)
+
+        XCTAssertNil(pausedState.workStartTime)
+        XCTAssertNil(pausedState.breakStartTime)
+        XCTAssertNil(pausedState.postponeStartTime)
+        XCTAssertEqual(pausedState.postponeDuration, 0)
+        XCTAssertEqual(pausedState.totalPostponedTime, 0)
+        XCTAssertEqual(pausedState.currentWorkDuration, 30 * 60)
+        XCTAssertEqual(pausedState.currentBreakDuration, 3 * 60)
+        XCTAssertTrue(pausedState.isCustomMode)
+        XCTAssertEqual(pausedState.lastSaved, pausedAt)
+        XCTAssertTrue(pausedState.pausedBySystemEvent)
+    }
+
     private func date(_ value: String) -> Date {
         let formatter = ISO8601DateFormatter()
         return formatter.date(from: value)!

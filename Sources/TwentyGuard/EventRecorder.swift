@@ -98,6 +98,11 @@ class EventRecorder {
         print("📊 EventRecorder: System sleep detected")
     }
 
+    func endActiveSessionForSystemPause(reason: String) {
+        statsDB.endActiveSession()
+        print("📊 EventRecorder: System pause closed active session - \(reason)")
+    }
+
     func recordSystemWake() {
         // Log system event
         logManager.logEvent(.systemWake)

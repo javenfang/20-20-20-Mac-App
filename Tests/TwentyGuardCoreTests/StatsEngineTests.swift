@@ -114,6 +114,21 @@ final class StatsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.today.quality.diagnosticSessionIDs, [1])
     }
 
+    func testExcludesSessionsThatExceedPlannedDurationPlusGrace() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T16:00:00Z"))
+        let snapshot = engine.dashboard(from: [
+            session(id: 1, start: "2026-04-26T13:05:56Z", duration: 2 * 60 * 60 + 39 * 60, planned: 30 * 60),
+            session(id: 2, start: "2026-04-26T15:45:01Z", duration: 15 * 60, planned: 30 * 60)
+        ])
+
+        XCTAssertEqual(snapshot.today.workSessions, 1)
+        XCTAssertEqual(snapshot.today.totalWorkSeconds, 15 * 60)
+        XCTAssertEqual(snapshot.today.longestWorkSeconds, 15 * 60)
+        XCTAssertEqual(snapshot.today.quality.excludedStaleSessions, 1)
+        XCTAssertEqual(snapshot.today.quality.excludedStaleSessionIDs, [1])
+        XCTAssertEqual(snapshot.today.quality.diagnosticSessionIDs, [1])
+    }
+
     func testCompletionRateUsesBreakOpportunities() {
         let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T12:00:00Z"))
         let completedBreak = StatsBreakRecord(

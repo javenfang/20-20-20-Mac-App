@@ -64,6 +64,21 @@ public struct SessionState: Codable, Equatable, Sendable {
         )
     }
 
+    public func pausedForSystemEvent(now: Date) -> SessionState {
+        SessionState(
+            workStartTime: nil,
+            breakStartTime: nil,
+            postponeStartTime: nil,
+            postponeDuration: 0,
+            totalPostponedTime: 0,
+            currentWorkDuration: currentWorkDuration,
+            currentBreakDuration: currentBreakDuration,
+            isCustomMode: isCustomMode,
+            lastSaved: now,
+            pausedBySystemEvent: true
+        )
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.workStartTime = try container.decodeIfPresent(Date.self, forKey: .workStartTime)

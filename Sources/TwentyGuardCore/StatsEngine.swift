@@ -742,7 +742,7 @@ public struct StatsEngine: Sendable {
         let expectedCeiling = record.plannedDurationSeconds +
             record.postponeTotalDurationSeconds +
             staleSessionGraceSeconds
-        let threshold = max(staleSessionDurationSeconds, expectedCeiling)
+        let threshold = min(staleSessionDurationSeconds, expectedCeiling)
         return duration > threshold
     }
 
