@@ -7,8 +7,17 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.7.3",
+  "current_version": "1.7.4",
   "versions": [
+    {
+      "version": "1.7.4",
+      "date": "2026-05-24",
+      "changes": [
+        "Added Command-W support to close the statistics dashboard window",
+        "Added Command-C as the key equivalent for the statistics dashboard Close button",
+        "Added AppKit shortcut regression tests for the statistics dashboard"
+      ]
+    },
     {
       "version": "1.7.3",
       "date": "2026-05-24",

@@ -1,6 +1,34 @@
 import Cocoa
 import TwentyGuardCore
 
+enum StatsDashboardKeyboardShortcut {
+    static let closeButtonKeyEquivalent = "c"
+    static let closeButtonModifierMask: NSEvent.ModifierFlags = .command
+
+    static func configureCloseButton(_ button: NSButton) {
+        button.keyEquivalent = closeButtonKeyEquivalent
+        button.keyEquivalentModifierMask = closeButtonModifierMask
+    }
+
+    static func isCloseWindowEvent(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return false }
+
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.command),
+              !modifiers.contains(.control),
+              !modifiers.contains(.option) else {
+            return false
+        }
+
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "w", closeButtonKeyEquivalent:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 final class StatsDashboardWindow: NSWindow {
     private let statsDB = StatsDatabase.shared
     private let verdictEvaluator = StatsHealthVerdictEvaluator()
@@ -44,6 +72,14 @@ final class StatsDashboardWindow: NSWindow {
         loadSnapshot()
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if StatsDashboardKeyboardShortcut.isCloseWindowEvent(event) {
+            close()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     private func setupWindow() {
         title = localized("eye_health_report")
         minSize = NSSize(width: 560, height: 560)
@@ -80,6 +116,7 @@ final class StatsDashboardWindow: NSWindow {
         closeButton.bezelStyle = .rounded
         closeButton.target = self
         closeButton.action = #selector(closeWindow)
+        StatsDashboardKeyboardShortcut.configureCloseButton(closeButton)
 
         let separator = NSBox()
         separator.translatesAutoresizingMaskIntoConstraints = false
