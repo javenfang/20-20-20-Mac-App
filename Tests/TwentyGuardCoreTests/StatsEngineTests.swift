@@ -143,6 +143,37 @@ final class StatsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.today.quality.activeBreakSessionIDs, [2])
     }
 
+    func testDuplicateRestoredWorkSessionDoesNotCreatePhantomMissedBreak() {
+        let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T11:00:00Z"))
+        let completedBreak = StatsBreakRecord(
+            plannedDurationSeconds: 180,
+            actualDurationSeconds: 180,
+            startTime: date("2026-04-26T09:30:00Z"),
+            endTime: date("2026-04-26T09:33:00Z"),
+            status: .completed
+        )
+
+        let snapshot = engine.dashboard(from: [
+            session(
+                id: 1,
+                start: "2026-04-26T09:00:00Z",
+                duration: 600,
+                breakRecord: completedBreak,
+                breakCompleted: true
+            ),
+            session(
+                id: 2,
+                start: "2026-04-26T09:00:00Z",
+                duration: 3_200
+            )
+        ])
+
+        XCTAssertEqual(snapshot.today.breakOpportunities, 1)
+        XCTAssertEqual(snapshot.today.completedBreaks, 1)
+        XCTAssertEqual(snapshot.today.breakCompletionRate, 1.0)
+        XCTAssertEqual(snapshot.today.longestWorkSeconds, 600)
+    }
+
     func testAggregatesAppExitProtectionInterruptionsForActiveDays() {
         let engine = StatsEngine(calendar: calendar, now: date("2026-04-26T18:00:00Z"))
 

@@ -476,7 +476,11 @@ public struct StatsEngine: Sendable {
         var totalWorkSeconds = 0
         var longestWorkSeconds = 0
 
-        for record in records where record.startTime >= dayStart && record.startTime < dayEnd {
+        let dayRecords = records.filter { record in
+            record.startTime >= dayStart && record.startTime < dayEnd
+        }
+
+        for record in deduplicatedRestoredWorkSessions(dayRecords) {
             collectQualitySignals(from: record, into: &quality)
 
             let duration = effectiveDuration(for: record)
@@ -592,6 +596,55 @@ public struct StatsEngine: Sendable {
         var temporaryDisableSeconds = 0
         var nightOverrideCount = 0
         var nightOverrideSeconds = 0
+    }
+
+    private func deduplicatedRestoredWorkSessions(_ records: [StatsSessionRecord]) -> [StatsSessionRecord] {
+        let duplicateStartTolerance: TimeInterval = 1.0
+        let sorted = records.sorted {
+            if abs($0.startTime.timeIntervalSince($1.startTime)) > duplicateStartTolerance {
+                return $0.startTime < $1.startTime
+            }
+            return $0.id < $1.id
+        }
+
+        var result: [StatsSessionRecord] = []
+        var group: [StatsSessionRecord] = []
+
+        func appendBestFromGroup() {
+            guard !group.isEmpty else { return }
+            result.append(group.max(by: { duplicateRecoveryScore($0) < duplicateRecoveryScore($1) }) ?? group[0])
+        }
+
+        for record in sorted {
+            guard let first = group.first else {
+                group = [record]
+                continue
+            }
+
+            if abs(record.startTime.timeIntervalSince(first.startTime)) <= duplicateStartTolerance {
+                group.append(record)
+            } else {
+                appendBestFromGroup()
+                group = [record]
+            }
+        }
+
+        appendBestFromGroup()
+        return result
+    }
+
+    private func duplicateRecoveryScore(_ record: StatsSessionRecord) -> Int {
+        var score = 0
+        if isCompletedBreak(record) { score += 1_000 }
+        if record.breakRecord != nil { score += 500 }
+        if !record.postpones.isEmpty ||
+            (record.recordedPostponeCount ?? 0) > 0 ||
+            record.postponeTotalDurationSeconds > 0 {
+            score += 200
+        }
+        if record.status == .active { score += 50 }
+        score += min(49, max(0, Int(record.id)))
+        return score
     }
 
     private func summarizeEvents(

@@ -502,6 +502,15 @@ class StatsDatabase {
 
             do {
                 let sessionId = try self.withTransaction {
+                    if let startTime,
+                       let existingSessionId = try self.reuseActiveWorkSessionInternal(
+                           startTime: startTime,
+                           plannedDuration: plannedDuration
+                       ) {
+                        print("📊 Reused active work session #\(existingSessionId) during restore")
+                        return existingSessionId
+                    }
+
                     // End any active sessions first
                     try self.endActiveSessionInternal()
 
@@ -554,6 +563,59 @@ class StatsDatabase {
 
         semaphore.wait()
         return result
+    }
+
+    private func reuseActiveWorkSessionInternal(startTime: Date, plannedDuration: Int) throws -> Int64? {
+        let timestamp = startTime.timeIntervalSince1970
+        let tolerance: TimeInterval = 1.0
+        let selectSQL = """
+            SELECT id
+            FROM sessions
+            WHERE type = 'work'
+              AND status = 'active'
+              AND break_info IS NULL
+              AND ABS(start_time - ?) <= ?
+            ORDER BY ABS(start_time - ?) ASC, id DESC
+            LIMIT 1
+        """
+
+        var selectStmt: OpaquePointer?
+        defer { sqlite3_finalize(selectStmt) }
+
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare active work session reuse")
+        }
+
+        sqlite3_bind_double(selectStmt, 1, timestamp)
+        sqlite3_bind_double(selectStmt, 2, tolerance)
+        sqlite3_bind_double(selectStmt, 3, timestamp)
+
+        guard sqlite3_step(selectStmt) == SQLITE_ROW else {
+            return nil
+        }
+
+        let sessionId = sqlite3_column_int64(selectStmt, 0)
+        let updateSQL = """
+            UPDATE sessions
+            SET planned_duration = ?
+            WHERE id = ?
+        """
+
+        var updateStmt: OpaquePointer?
+        defer { sqlite3_finalize(updateStmt) }
+
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK else {
+            throw DatabaseError.queryFailed("Failed to prepare active work session reuse update")
+        }
+
+        sqlite3_bind_int(updateStmt, 1, Int32(plannedDuration))
+        sqlite3_bind_int64(updateStmt, 2, sessionId)
+
+        guard sqlite3_step(updateStmt) == SQLITE_DONE else {
+            throw DatabaseError.queryFailed("Failed to update reused active work session")
+        }
+
+        return sessionId
     }
 
     // Start break - creates break_info JSON in the work session

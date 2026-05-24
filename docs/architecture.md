@@ -1,6 +1,6 @@
 # TwentyGuard - 技术架构文档
 
-> **文档版本**: v1.7.4
+> **文档版本**: v1.7.5
 > **最后更新**: 2026-05-24
 > **维护者**: Javen Fang (@javenfang)
 
@@ -134,6 +134,7 @@ Sources/TwentyGuard/
 - ⭐ v1.7.2 修复：推迟休息统计记录到当前未完成休息所属的 work session，而不是只查 active work session
 - ⭐ v1.7.3 修复：推迟到期会关闭 active postpone，完成欠下休息会完成同一 break opportunity；新工作周期会中断未闭合 break/postpone，数据质量会显示异常 session ID
 - ⭐ v1.7.4 调整：统计窗口直接处理 ⌘W 关闭，右下角 Close 按钮配置 ⌘C key equivalent
+- ⭐ v1.7.5 修复：恢复同一 work session 时复用 active row，统计层忽略同开始时间恢复副本，避免不可能的超长工作污染完成率
 
 📖 **详细实现**: [`AppDelegate.swift:54-86`](../Sources/TwentyGuard/AppDelegate.swift#L54-L86)
 
@@ -623,7 +624,7 @@ bundle 放错到 `.app` 根目录、`.DS_Store`、以及源码资产目录 `.xca
 <key>CFBundleInfoDictionaryVersion</key>
 <string>6.0</string>
 <key>CFBundleVersion</key>
-<string>1.7.4</string>
+<string>1.7.5</string>
 <key>LSMinimumSystemVersion</key>
 <string>12.0</string>
 ```
@@ -654,8 +655,8 @@ make release \
 - 发布产物: `dist/TwentyGuard-v1.5.3.dmg`
 - SHA-256: `322364e11c50a8ac7bccf71cceeeb136ff0bca338fb077b3664e53511be355cc`
 
-v1.7.4 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
-公证并 staple 后的 `dist/TwentyGuard-v1.7.4.dmg`，再更新本节发布验证结果。
+v1.7.5 当前为功能实现版本；公开分发前需要重新执行 `make release`，生成签名、
+公证并 staple 后的 `dist/TwentyGuard-v1.7.5.dmg`，再更新本节发布验证结果。
 
 ### 8.4 版本管理
 
@@ -902,6 +903,7 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 | v1.7.2 | 2026-05-23 | 修复推迟统计落库目标错误：break 已开始后 work session 已完成，推迟现在优先挂到当前未完成 break 所属会话；新增 app 层 SQLite 回归测试 |
 | v1.7.3 | 2026-05-24 | 修复 break/postpone 生命周期闭合：推迟恢复休息时关闭 active postpone，完成欠下休息时完成同一 break opportunity，新工作周期中断遗留 active 记录；数据质量隐藏无害启动碎片并显示异常 session ID |
 | v1.7.4 | 2026-05-24 | 统计窗口支持 ⌘W 关闭；右下角 Close 按钮配置 ⌘C key equivalent；新增 AppKit 快捷键回归测试 |
+| v1.7.5 | 2026-05-24 | 恢复同一工作开始时间时复用 active session row；统计引擎按同一开始时间去重恢复副本，优先保留带休息/推迟证据的记录；新增 SQLite 与 StatsEngine 回归测试 |
 
 ### B. 相关文档
 
@@ -918,4 +920,4 @@ du -h ~/Library/Application\ Support/com.javengroup.twentyguard/twentyguard_stat
 ---
 
 **最后更新**: 2026-05-24
-**文档版本**: v1.7.4
+**文档版本**: v1.7.5

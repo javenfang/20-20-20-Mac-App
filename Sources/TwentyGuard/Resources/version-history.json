@@ -7,8 +7,17 @@
     "email": "javen.out@gmail.com",
     "github": "JavenGroup/TwentyGuard"
   },
-  "current_version": "1.7.4",
+  "current_version": "1.7.5",
   "versions": [
+    {
+      "version": "1.7.5",
+      "date": "2026-05-24",
+      "changes": [
+        "Reused active work sessions during session restoration so duplicate recovered rows do not create impossible long work periods",
+        "Ignored duplicate restored work-session rows with the same start time when calculating break completion statistics",
+        "Added SQLite and StatsEngine regression tests for duplicate recovered session handling"
+      ]
+    },
     {
       "version": "1.7.4",
       "date": "2026-05-24",

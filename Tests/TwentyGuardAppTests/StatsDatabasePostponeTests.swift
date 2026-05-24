@@ -2,6 +2,26 @@ import XCTest
 @testable import TwentyGuard
 
 final class StatsDatabasePostponeTests: XCTestCase {
+    func testRestoringSameActiveWorkSessionReusesExistingRow() throws {
+        let databaseURL = temporaryDirectory().appendingPathComponent("stats.db")
+        let database = StatsDatabase(databaseURL: databaseURL, registersForAppTermination: false)
+        defer { database.closeForTesting() }
+
+        let workStart = Date().addingTimeInterval(-120)
+        let firstSessionID = database.startWorkSession(plannedDuration: 1_800, startTime: workStart)
+        database.waitForIdleForTesting()
+
+        let restoredSessionID = database.startWorkSession(plannedDuration: 1_800, startTime: workStart)
+        database.waitForIdleForTesting()
+
+        let records = try database.sessionRecordsSinceForTesting(workStart.addingTimeInterval(-1))
+
+        XCTAssertEqual(restoredSessionID, firstSessionID)
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].status, .active)
+        XCTAssertEqual(records[0].startTime.timeIntervalSince1970, workStart.timeIntervalSince1970, accuracy: 0.001)
+    }
+
     func testPostponeDuringActiveBreakAttachesToBreakSession() throws {
         let databaseURL = temporaryDirectory().appendingPathComponent("stats.db")
         let database = StatsDatabase(databaseURL: databaseURL, registersForAppTermination: false)
